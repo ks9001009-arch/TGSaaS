@@ -15,6 +15,8 @@ import { StatsModule } from './stats/stats.module';
 import { SchedulerModule } from './scheduler/scheduler.module';
 import { AdsModule } from './ads/ads.module';
 import { MarketingModule } from './marketing/marketing.module';
+import { ListenerModule } from './listener/listener.module';
+import { SystemModule } from './system/system.module';
 import { HealthController } from './health.controller';
 
 @Module({
@@ -35,6 +37,8 @@ import { HealthController } from './health.controller';
     SchedulerModule,
     AdsModule,
     MarketingModule,
+    ListenerModule,
+    SystemModule,
   ],
   controllers: [HealthController],
 })

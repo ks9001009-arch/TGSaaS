@@ -23,9 +23,10 @@ export interface PermissionGroup {
 interface AccessState {
   isSuper: boolean;
   bots: BotAccess[];
+  perms: string[]; // role-based permissions (global to the admin)
   groups: PermissionGroup[]; // permission catalog for rendering toggles
   loading: boolean;
-  /** super => always true; with botId => that bot's perms; without => any bot has it */
+  /** super => always true; with botId => that bot's perms; without => role perms or any bot has it */
   can: (perm: string, botId?: string) => boolean;
   permsForBot: (botId: string) => string[];
   refresh: () => Promise<void>;
@@ -36,6 +37,7 @@ const AccessContext = createContext<AccessState>({} as AccessState);
 export function AccessProvider({ children }: { children: ReactNode }) {
   const [isSuper, setIsSuper] = useState(false);
   const [bots, setBots] = useState<BotAccess[]>([]);
+  const [perms, setPerms] = useState<string[]>([]);
   const [groups, setGroups] = useState<PermissionGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const esRef = useRef<EventSource | null>(null);
@@ -47,11 +49,12 @@ export function AccessProvider({ children }: { children: ReactNode }) {
     }
     try {
       const [access, meta] = await Promise.all([
-        api.get<{ isSuper: boolean; bots: BotAccess[] }>('/admins/me/access'),
+        api.get<{ isSuper: boolean; bots: BotAccess[]; permissions: string[] }>('/admins/me/access'),
         api.get<{ groups: PermissionGroup[] }>('/admins/meta/permissions'),
       ]);
       setIsSuper(access.isSuper);
       setBots(access.bots || []);
+      setPerms(access.permissions || []);
       setGroups(meta.groups || []);
     } catch {
       // ignore
@@ -91,9 +94,9 @@ export function AccessProvider({ children }: { children: ReactNode }) {
     (perm: string, botId?: string) => {
       if (isSuper) return true;
       if (botId) return bots.find((b) => b.botId === botId)?.permissions.includes(perm) ?? false;
-      return bots.some((b) => b.permissions.includes(perm));
+      return perms.includes(perm) || bots.some((b) => b.permissions.includes(perm));
     },
-    [isSuper, bots],
+    [isSuper, bots, perms],
   );
 
   const permsForBot = useCallback(
@@ -105,7 +108,7 @@ export function AccessProvider({ children }: { children: ReactNode }) {
   );
 
   return (
-    <AccessContext.Provider value={{ isSuper, bots, groups, loading, can, permsForBot, refresh }}>
+    <AccessContext.Provider value={{ isSuper, bots, perms, groups, loading, can, permsForBot, refresh }}>
       {children}
     </AccessContext.Provider>
   );
@@ -156,6 +159,13 @@ export const PERM = {
   TEMPLATE_MANAGE: 'template.manage',
   TEMPLATE_APPLY: 'template.apply',
   TEMPLATE_UNAPPLY: 'template.unapply',
+  // listener center
+  LISTENER_VIEW: 'listener.view',
+  LISTENER_ACCOUNT: 'listener.account',
+  LISTENER_GROUP: 'listener.group',
+  LISTENER_RULE: 'listener.rule',
+  LISTENER_PUSH: 'listener.push',
+  LISTENER_STATS: 'listener.stats',
   // system
   ADMINS_MANAGE: 'admins.manage',
   SETTINGS_MANAGE: 'settings.manage',

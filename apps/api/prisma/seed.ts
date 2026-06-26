@@ -40,6 +40,12 @@ const PERMISSION_CATALOG: { key: string; label: string; category: string }[] = [
   { key: 'template.manage', label: '管理消息模板', category: 'marketing' },
   { key: 'template.apply', label: '批量应用广告模板', category: 'marketing' },
   { key: 'template.unapply', label: '移除广告模板应用', category: 'marketing' },
+  { key: 'listener.view', label: '进入监听中心', category: 'listener' },
+  { key: 'listener.account', label: '管理监听账号', category: 'listener' },
+  { key: 'listener.group', label: '管理监听群组', category: 'listener' },
+  { key: 'listener.rule', label: '管理关键词规则', category: 'listener' },
+  { key: 'listener.push', label: '管理推送目标', category: 'listener' },
+  { key: 'listener.stats', label: '查看监听统计', category: 'listener' },
   { key: 'admins.manage', label: '管理管理员', category: 'system' },
   { key: 'settings.manage', label: '系统设置', category: 'system' },
 ];

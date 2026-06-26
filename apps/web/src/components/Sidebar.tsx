@@ -21,6 +21,13 @@ import {
   Clock,
   ChevronDown,
   ChevronRight,
+  Radio,
+  Phone,
+  KeyRound,
+  Send,
+  ListChecks,
+  ServerCog,
+  KeySquare,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { useAccess, PERM } from '@/lib/access';
@@ -70,6 +77,18 @@ export default function Sidebar() {
         ],
       },
       {
+        id: 'listener',
+        title: '监听中心',
+        icon: Radio,
+        items: [
+          { href: '/dashboard/listener', label: '监听账号', icon: Phone, show: isSuper || can(PERM.LISTENER_VIEW) || can(PERM.LISTENER_ACCOUNT) },
+          { href: '/dashboard/listener/groups', label: '监听群组', icon: Users, show: isSuper || can(PERM.LISTENER_VIEW) || can(PERM.LISTENER_GROUP) },
+          { href: '/dashboard/listener/rules', label: '关键词规则', icon: KeyRound, show: isSuper || can(PERM.LISTENER_VIEW) || can(PERM.LISTENER_RULE) },
+          { href: '/dashboard/listener/targets', label: '推送目标', icon: Send, show: isSuper || can(PERM.LISTENER_VIEW) || can(PERM.LISTENER_PUSH) },
+          { href: '/dashboard/listener/hits', label: '命中记录', icon: ListChecks, show: isSuper || can(PERM.LISTENER_STATS) },
+        ],
+      },
+      {
         id: 'marketing',
         title: '营销中心',
         icon: Megaphone,
@@ -100,9 +119,10 @@ export default function Sidebar() {
       },
       {
         id: 'platform',
-        title: '平台设置',
-        icon: Settings,
+        title: '系统中心',
+        icon: ServerCog,
         items: [
+          { href: '/dashboard/system/telegram-api', label: 'Telegram API', icon: KeySquare, show: isSuper },
           { href: '/dashboard/settings', label: '系统设置', icon: Settings, show: isSuper || can(PERM.SETTINGS_MANAGE) },
           { href: '/dashboard/account', label: '我的账户', icon: UserCircle, show: true },
         ],

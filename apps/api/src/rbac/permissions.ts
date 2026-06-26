@@ -52,6 +52,14 @@ export const PERMISSIONS = {
   TEMPLATE_APPLY: 'template.apply',     // 批量应用广告模板到群组
   TEMPLATE_UNAPPLY: 'template.unapply', // 移除群组的广告模板
 
+  // ---- listener center (MTProto real accounts) ----
+  LISTENER_VIEW: 'listener.view',         // 进入监听中心
+  LISTENER_ACCOUNT: 'listener.account',   // 管理监听账号（增删/启停/登录）
+  LISTENER_GROUP: 'listener.group',       // 管理监听群组
+  LISTENER_RULE: 'listener.rule',         // 管理关键词规则
+  LISTENER_PUSH: 'listener.push',         // 管理推送目标
+  LISTENER_STATS: 'listener.stats',       // 查看监听统计 / 命中记录
+
   // ---- system ----
   ADMINS_MANAGE: 'admins.manage',     // 管理管理员
   SETTINGS_MANAGE: 'settings.manage', // 系统设置
@@ -121,6 +129,13 @@ export const PERMISSION_CATALOG: { key: PermissionKey; label: string; category: 
   { key: PERMISSIONS.TEMPLATE_APPLY, label: '批量应用广告模板', category: 'marketing' },
   { key: PERMISSIONS.TEMPLATE_UNAPPLY, label: '移除广告模板应用', category: 'marketing' },
 
+  { key: PERMISSIONS.LISTENER_VIEW, label: '进入监听中心', category: 'listener' },
+  { key: PERMISSIONS.LISTENER_ACCOUNT, label: '管理监听账号', category: 'listener' },
+  { key: PERMISSIONS.LISTENER_GROUP, label: '管理监听群组', category: 'listener' },
+  { key: PERMISSIONS.LISTENER_RULE, label: '管理关键词规则', category: 'listener' },
+  { key: PERMISSIONS.LISTENER_PUSH, label: '管理推送目标', category: 'listener' },
+  { key: PERMISSIONS.LISTENER_STATS, label: '查看监听统计', category: 'listener' },
+
   { key: PERMISSIONS.ADMINS_MANAGE, label: '管理管理员', category: 'system' },
   { key: PERMISSIONS.SETTINGS_MANAGE, label: '系统设置', category: 'system' },
 ];
@@ -173,6 +188,17 @@ export const PERMISSION_GROUPS: {
       { key: PERMISSIONS.TEMPLATE_MANAGE, label: '管理消息模板' },
       { key: PERMISSIONS.TEMPLATE_APPLY, label: '批量应用广告模板' },
       { key: PERMISSIONS.TEMPLATE_UNAPPLY, label: '移除广告模板应用' },
+    ],
+  },
+  {
+    label: '监听中心',
+    items: [
+      { key: PERMISSIONS.LISTENER_VIEW, label: '进入监听中心' },
+      { key: PERMISSIONS.LISTENER_ACCOUNT, label: '管理监听账号' },
+      { key: PERMISSIONS.LISTENER_GROUP, label: '管理监听群组' },
+      { key: PERMISSIONS.LISTENER_RULE, label: '管理关键词规则' },
+      { key: PERMISSIONS.LISTENER_PUSH, label: '管理推送目标' },
+      { key: PERMISSIONS.LISTENER_STATS, label: '查看监听统计' },
     ],
   },
   {

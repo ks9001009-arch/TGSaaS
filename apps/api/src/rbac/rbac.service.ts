@@ -16,6 +16,7 @@ export interface AccessContext {
   permissions: Set<string>;  // permission keys granted by the admin's role
   botIds: string[];          // bots in scope (super => all tenant bots)
   groupIds: string[];        // groups in scope (super => all tenant groups)
+  listenerIds: string[];     // listener accounts in scope (super => all tenant)
 }
 
 @Injectable()
@@ -34,9 +35,10 @@ export class RbacService {
     const tenantId = admin.tenantId;
 
     if (admin.isSuperAdmin) {
-      const [bots, groups] = await Promise.all([
+      const [bots, groups, listeners] = await Promise.all([
         this.prisma.bot.findMany({ where: { tenantId }, select: { id: true } }),
         this.prisma.group.findMany({ where: { tenantId }, select: { id: true } }),
+        this.prisma.listenerAccount.findMany({ where: { tenantId }, select: { id: true } }),
       ]);
       return {
         adminId,
@@ -45,6 +47,7 @@ export class RbacService {
         permissions: new Set<string>(), // not consulted for super admins
         botIds: bots.map((b) => b.id),
         groupIds: groups.map((g) => g.id),
+        listenerIds: listeners.map((l) => l.id),
       };
     }
 
@@ -52,9 +55,10 @@ export class RbacService {
       (admin.role?.permissions ?? []).map((rp) => rp.permission.key),
     );
 
-    const [adminBots, adminGroups] = await Promise.all([
+    const [adminBots, adminGroups, adminListeners] = await Promise.all([
       this.prisma.adminBot.findMany({ where: { adminId, tenantId }, select: { botId: true } }),
       this.prisma.adminGroup.findMany({ where: { adminId, tenantId }, select: { groupId: true } }),
+      this.prisma.adminListener.findMany({ where: { adminId, tenantId }, select: { accountId: true } }),
     ]);
     const botIds = adminBots.map((b) => b.botId);
 
@@ -77,6 +81,7 @@ export class RbacService {
       permissions,
       botIds,
       groupIds: groups.map((g) => g.id),
+      listenerIds: adminListeners.map((l) => l.accountId),
     };
   }
 
@@ -99,6 +104,14 @@ export class RbacService {
 
   assertGroup(ctx: AccessContext, groupId: string, perm: PermissionKey) {
     if (!this.canGroup(ctx, groupId, perm)) throw new ForbiddenException('没有该群组的操作权限');
+  }
+
+  canListener(ctx: AccessContext, accountId: string, perm: PermissionKey): boolean {
+    return ctx.listenerIds.includes(accountId) && this.has(ctx, perm);
+  }
+
+  assertListener(ctx: AccessContext, accountId: string, perm: PermissionKey) {
+    if (!this.canListener(ctx, accountId, perm)) throw new ForbiddenException('没有该监听账号的操作权限');
   }
 
   assertSuper(ctx: AccessContext) {

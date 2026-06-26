@@ -50,6 +50,13 @@ model Tenant {
   marketingButtons MarketingButton[]
   messageTemplates MessageTemplate[]
   templateAssignments TemplateAssignment[]
+  listenerAccounts ListenerAccount[]
+  listenerGroups   ListenerGroup[]
+  listenerRules    ListenerKeywordRule[]
+  listenerHits     ListenerHit[]
+  listenerPushTargets ListenerPushTarget[]
+  listenerPushLogs ListenerPushLog[]
+  adminListeners   AdminListener[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -115,6 +122,7 @@ model Admin {
   ownedBots        Bot[]        @relation("BotOwner")
   adminBots        AdminBot[]
   adminGroups      AdminGroup[]
+  adminListeners   AdminListener[]
   ownedAds         Ad[]         @relation("AdOwner")
 
   createdAt        DateTime @default(now())
@@ -769,5 +777,194 @@ model TemplateClick {
 
   @@index([templateId, createdAt])
   @@index([groupId, createdAt])
+  @@index([tenantId, createdAt])
+}
+
+// ============================================================
+//  System Center — platform-global key/value settings
+//  Used for the shared Telegram API ID / API Hash (MTProto). Secret values are
+//  encrypted at rest (AES-256-GCM) by the API; the Python listener decrypts
+//  them with the same ENCRYPTION_KEY. NOT tenant-scoped: one config per platform.
+// ============================================================
+model SystemSetting {
+  id        String   @id @default(cuid())
+  key       String   @unique // e.g. telegram.api_id | telegram.api_hash
+  value     String   @default("") // encrypted (v1:<iv>:<ct+tag>) for secrets, plain otherwise
+  encrypted Boolean  @default(false)
+  updatedAt DateTime @updatedAt
+}
+
+// ============================================================
+//  Listener Center — real (MTProto) Telegram user accounts via Telethon.
+//  These are NOT bot tokens. A standalone Docker "listener" service owns the
+//  Telethon clients/sessions; these tables are the shared control + data plane.
+// ============================================================
+
+// A real Telegram account used for listening. The session lives on disk in the
+// listener container (sessionPath); the DB tracks status so the dashboard can
+// render it and the service can auto-resume on restart without re-login.
+model ListenerAccount {
+  id            String   @id @default(cuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  phone         String   // E.164, e.g. +8613800138000
+  label         String   @default("") // 备注
+
+  sessionPath   String?  // path of the .session file inside the listener container
+  // NEW | CODE_SENT | PASSWORD_NEEDED | LOGGED_IN | FAILED | LOGGED_OUT
+  loginStatus   String   @default("NEW")
+  // ONLINE | OFFLINE | CONNECTING
+  onlineStatus  String   @default("OFFLINE")
+  // NONE | SAVED | INVALID
+  sessionStatus String   @default("NONE")
+
+  enabled       Boolean  @default(true)
+  lastConnectedAt DateTime?
+  lastError     String?
+
+  groups        ListenerGroup[]
+  rules         ListenerKeywordRule[]
+  hits          ListenerHit[]
+  pushLogs      ListenerPushLog[]
+  adminListeners AdminListener[]
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([tenantId, phone])
+  @@index([tenantId])
+}
+
+// Binding: which listener accounts a sub-admin may manage (super => all).
+model AdminListener {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  adminId   String
+  admin     Admin    @relation(fields: [adminId], references: [id], onDelete: Cascade)
+  accountId String
+  account   ListenerAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([adminId, accountId])
+}
+
+// A group/channel a listener account is in (auto-read from its dialogs).
+model ListenerGroup {
+  id            String   @id @default(cuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  accountId     String
+  account       ListenerAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  tgChatId      String   // -100xxxxxxxxxx
+  title         String   @default("")
+  username      String?
+  type          String   @default("GROUP") // GROUP | SUPERGROUP | CHANNEL
+
+  listening     Boolean  @default(false)
+  lastMessageAt DateTime?
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([accountId, tgChatId])
+  @@index([tenantId])
+}
+
+// Keyword rule. Scope decides where it applies:
+//   TENANT  => all listening groups of the tenant
+//   ACCOUNT => all listening groups of accountId
+//   GROUP   => only listenerGroupId's tgChatId
+model ListenerKeywordRule {
+  id            String   @id @default(cuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  name          String   @default("")
+  scope         String   @default("TENANT") // TENANT | ACCOUNT | GROUP
+  accountId     String?
+  account       ListenerAccount? @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  // when scope = GROUP, this is the tgChatId the rule is bound to
+  chatId        String?
+
+  include       String[] @default([]) // hit if message contains ANY of these
+  exclude       String[] @default([]) // skip if message contains ANY of these
+  regex         String?  // reserved (advanced) — applied if set
+  enabled       Boolean  @default(true)
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([tenantId])
+}
+
+// A matched message (kept for analytics + as the source for pushing).
+model ListenerHit {
+  id            String   @id @default(cuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  ruleId        String?
+  accountId     String
+  account       ListenerAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  sourceChatId  String
+  sourceTitle   String   @default("")
+  sourceUsername String?
+  senderId      String?
+  senderName    String?
+  senderUsername String?
+  messageId     String
+  content       String   @default("")
+  messageLink   String?
+  matchedKeyword String?
+
+  createdAt     DateTime @default(now())
+
+  @@index([tenantId, createdAt])
+  @@index([accountId, createdAt])
+}
+
+// Where matched messages are pushed. mode controls forward-vs-link behavior.
+model ListenerPushTarget {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  label     String   @default("")
+  type      String   @default("GROUP") // BOT | GROUP | CHANNEL | ADMIN_DM
+  chatId    String   // @username / -100... / numeric user id
+  // PREFER_FORWARD | FORWARD_ONLY | LINK_ONLY | FORWARD_THEN_LINK
+  mode      String   @default("PREFER_FORWARD")
+  enabled   Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId])
+}
+
+// One push attempt. Unique(sourceChatId, messageId, targetId) => a message is
+// delivered to a given target at most once (de-duplication).
+model ListenerPushLog {
+  id           String   @id @default(cuid())
+  tenantId     String
+  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  hitId        String?
+  accountId    String?
+  account      ListenerAccount? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+
+  sourceChatId String
+  messageId    String
+  targetId     String
+  mode         String   @default("PREFER_FORWARD")
+  method       String   @default("FORWARD") // FORWARD | LINK
+  status       String   @default("SENT")    // SENT | FAILED
+  failReason   String?
+
+  createdAt    DateTime @default(now())
+
+  @@unique([sourceChatId, messageId, targetId])
   @@index([tenantId, createdAt])
 }

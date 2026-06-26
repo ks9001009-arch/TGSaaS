@@ -57,6 +57,10 @@ services:
       RECAPTCHA_SECRET_KEY: ${RECAPTCHA_SECRET_KEY}
       AI_RISK_PROVIDER: ${AI_RISK_PROVIDER}
       AI_RISK_API_KEY: ${AI_RISK_API_KEY}
+      # Listener Center (MTProto) integration
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      LISTENER_URL: ${LISTENER_URL:-http://listener:8100}
+      LISTENER_TOKEN: ${LISTENER_TOKEN}
     expose:
       - "${API_PORT:-4000}"
     ports:
@@ -79,6 +83,29 @@ services:
     ports:
       - "${WEB_PORT:-3000}:3000"
 
+  # Python (Telethon) MTProto listener — real Telegram accounts (NOT bot tokens).
+  listener:
+    build:
+      context: ./apps/listener
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      LISTENER_PORT: ${LISTENER_PORT:-8100}
+      LISTENER_TOKEN: ${LISTENER_TOKEN}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      SESSION_DIR: /sessions
+    expose:
+      - "${LISTENER_PORT:-8100}"
+    volumes:
+      - listener_sessions:/sessions
+
   nginx:
     image: nginx:1.27-alpine
     restart: unless-stopped
@@ -86,10 +113,11 @@ services:
       - api
       - web
     ports:
-      - "80:80"
+      - "${NGINX_HTTP_PORT:-80}:80"
     volumes:
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
 
 volumes:
   pgdata:
   redisdata:
+  listener_sessions:
