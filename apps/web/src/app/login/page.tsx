@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth';
 import { Bot } from 'lucide-react';
@@ -52,16 +51,10 @@ export default function LoginPage() {
           <button className="btn-primary w-full" disabled={loading}>
             {loading ? '登录中…' : '登录'}
           </button>
-          <p className="text-center text-sm text-tg-muted">
-            还没有账号？{' '}
-            <Link href="/register" className="text-tg-blue hover:underline">
-              立即注册
-            </Link>
+          <p className="text-center text-xs text-tg-muted">
+            账号由管理员统一开通，如需账号请联系管理员。
           </p>
         </form>
-        <p className="mt-4 text-center text-xs text-tg-muted">
-          演示账号：admin@demo.local / admin12345
-        </p>
       </div>
     </div>
   );

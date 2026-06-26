@@ -1,4 +1,4 @@
-import { Injectable, ConflictException, UnauthorizedException } from '@nestjs/common';
+import { Injectable, ConflictException, UnauthorizedException, ForbiddenException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
@@ -25,6 +25,12 @@ export class AuthService {
   // Self-service signup => creates a brand new tenant with this account as its
   // super admin. Tenants are fully isolated from one another.
   async register(dto: RegisterDto) {
+    // Public self-service registration is disabled by default. Accounts are
+    // created by a super admin and handed out. Set ALLOW_REGISTRATION=true to
+    // re-enable open signup.
+    if (process.env.ALLOW_REGISTRATION !== 'true') {
+      throw new ForbiddenException('公开注册已关闭，请联系管理员开通账号');
+    }
     const exists = await this.prisma.admin.findUnique({ where: { email: dto.email } });
     if (exists) throw new ConflictException('Email already registered');
 
