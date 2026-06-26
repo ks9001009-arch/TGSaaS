@@ -1,0 +1,26 @@
+{
+  "name": "tg-saas-platform",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Commercial-grade Telegram group management SaaS platform (monorepo)",
+  "packageManager": "pnpm@9.12.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "start": "turbo run start",
+    "api": "pnpm --filter tg-saas-api",
+    "web": "pnpm --filter tg-saas-web",
+    "prisma:generate": "pnpm --filter tg-saas-api prisma:generate",
+    "prisma:migrate": "pnpm --filter tg-saas-api prisma:migrate:dev",
+    "db:seed": "pnpm --filter tg-saas-api db:seed",
+    "docker:up": "docker compose up -d --build",
+    "docker:down": "docker compose down"
+  },
+  "devDependencies": {
+    "turbo": "^2.1.3"
+  }
+}

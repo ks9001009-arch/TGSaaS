@@ -1,0 +1,66 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  padding: 0;
+  margin: 0;
+}
+
+body {
+  background: #0e1621;
+  color: #e8edf2;
+}
+
+/* light theme overrides when .light is on <html> */
+html.light body {
+  background: #f3f5f7;
+  color: #1b2430;
+}
+
+@layer components {
+  .card {
+    @apply rounded-xl border border-black/30 bg-tg-panel p-5 shadow-lg shadow-black/20;
+  }
+  html.light .card {
+    @apply bg-white border-gray-200 shadow-sm;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply btn bg-tg-blue text-white hover:bg-tg-blueDark;
+  }
+  .btn-ghost {
+    @apply btn bg-tg-panel2 text-tg-text hover:bg-white/10;
+  }
+  .btn-danger {
+    @apply btn bg-tg-red/90 text-white hover:bg-tg-red;
+  }
+  .input {
+    @apply w-full rounded-lg border border-white/10 bg-tg-bg px-3 py-2 text-sm outline-none placeholder:text-tg-muted focus:border-tg-blue;
+  }
+  html.light .input {
+    @apply bg-gray-50 border-gray-300 text-gray-900;
+  }
+  .label {
+    @apply mb-1 block text-xs font-medium text-tg-muted;
+  }
+  .badge {
+    @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium;
+  }
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+}

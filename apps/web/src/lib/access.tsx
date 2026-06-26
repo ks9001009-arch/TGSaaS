@@ -1,0 +1,162 @@
+'use client';
+
+import { createContext, useCallback, useContext, useEffect, useRef, useState, ReactNode } from 'react';
+import { api, getToken } from './api';
+
+const BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost/api';
+
+export interface BotAccess {
+  botId: string;
+  permissions: string[];
+}
+
+export interface PermissionItem {
+  key: string;
+  label: string;
+  advanced?: boolean;
+}
+export interface PermissionGroup {
+  label: string;
+  items: PermissionItem[];
+}
+
+interface AccessState {
+  isSuper: boolean;
+  bots: BotAccess[];
+  groups: PermissionGroup[]; // permission catalog for rendering toggles
+  loading: boolean;
+  /** super => always true; with botId => that bot's perms; without => any bot has it */
+  can: (perm: string, botId?: string) => boolean;
+  permsForBot: (botId: string) => string[];
+  refresh: () => Promise<void>;
+}
+
+const AccessContext = createContext<AccessState>({} as AccessState);
+
+export function AccessProvider({ children }: { children: ReactNode }) {
+  const [isSuper, setIsSuper] = useState(false);
+  const [bots, setBots] = useState<BotAccess[]>([]);
+  const [groups, setGroups] = useState<PermissionGroup[]>([]);
+  const [loading, setLoading] = useState(true);
+  const esRef = useRef<EventSource | null>(null);
+
+  const refresh = useCallback(async () => {
+    if (!getToken()) {
+      setLoading(false);
+      return;
+    }
+    try {
+      const [access, meta] = await Promise.all([
+        api.get<{ isSuper: boolean; bots: BotAccess[] }>('/admins/me/access'),
+        api.get<{ groups: PermissionGroup[] }>('/admins/meta/permissions'),
+      ]);
+      setIsSuper(access.isSuper);
+      setBots(access.bots || []);
+      setGroups(meta.groups || []);
+    } catch {
+      // ignore
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  // Live permission sync via SSE: re-fetch access whenever the server says so.
+  useEffect(() => {
+    const token = getToken();
+    if (!token) return;
+    const es = new EventSource(`${BASE}/events?token=${encodeURIComponent(token)}`);
+    esRef.current = es;
+    es.onmessage = (ev) => {
+      try {
+        const payload = JSON.parse(ev.data);
+        if (payload?.type === 'permissions') refresh();
+      } catch {
+        // ignore pings / non-json
+      }
+    };
+    es.onerror = () => {
+      // browser auto-reconnects; nothing to do
+    };
+    return () => {
+      es.close();
+      esRef.current = null;
+    };
+  }, [refresh]);
+
+  const can = useCallback(
+    (perm: string, botId?: string) => {
+      if (isSuper) return true;
+      if (botId) return bots.find((b) => b.botId === botId)?.permissions.includes(perm) ?? false;
+      return bots.some((b) => b.permissions.includes(perm));
+    },
+    [isSuper, bots],
+  );
+
+  const permsForBot = useCallback(
+    (botId: string) => {
+      if (isSuper) return ['*'];
+      return bots.find((b) => b.botId === botId)?.permissions ?? [];
+    },
+    [isSuper, bots],
+  );
+
+  return (
+    <AccessContext.Provider value={{ isSuper, bots, groups, loading, can, permsForBot, refresh }}>
+      {children}
+    </AccessContext.Provider>
+  );
+}
+
+export const useAccess = () => useContext(AccessContext);
+
+// Mirror of the backend permission keys (apps/api/src/rbac/permissions.ts).
+export const PERM = {
+  // bots
+  BOT_VIEW: 'bot.view',
+  BOTS_CREATE: 'bots.create',
+  BOTS_DELETE: 'bots.delete',
+  BOT_START: 'bot.start',
+  BOT_STOP: 'bot.stop',
+  BOT_EDIT: 'bot.edit',
+  BOT_TOKEN: 'bot.token',
+  // groups
+  GROUPS_VIEW: 'groups.view',
+  GROUPS_EDIT: 'groups.edit',
+  GROUPS_DELETE: 'groups.delete',
+  // content / moderation
+  WELCOME_EDIT: 'welcome.edit',
+  VERIFY_EDIT: 'verify.edit',
+  CHANNEL_GATE_EDIT: 'channelGate.edit',
+  FILTER_ADS: 'filter.ads',
+  FILTER_LINKS: 'filter.links',
+  FILTER_KEYWORDS: 'filter.keywords',
+  ANTIFLOOD_EDIT: 'antiflood.edit',
+  BLACKLIST_EDIT: 'blacklist.edit',
+  WHITELIST_EDIT: 'whitelist.edit',
+  SCHEDULE_MANAGE: 'schedule.manage',
+  // data
+  STATS_VIEW: 'stats.view',
+  LOGS_VIEW: 'logs.view',
+  // ads
+  AD_VIEW: 'ad.view',
+  AD_CREATE: 'ad.create',
+  AD_EDIT: 'ad.edit',
+  AD_DELETE: 'ad.delete',
+  AD_TOGGLE: 'ad.toggle',
+  AD_ASSIGN_BOT: 'ad.assignBot',
+  AD_ASSIGN_GROUP: 'ad.assignGroup',
+  AD_STATS: 'ad.stats',
+  // marketing center
+  MARKETING_VIEW: 'marketing.view',
+  BUTTON_MANAGE: 'button.manage',
+  TEMPLATE_MANAGE: 'template.manage',
+  TEMPLATE_APPLY: 'template.apply',
+  TEMPLATE_UNAPPLY: 'template.unapply',
+  // system
+  ADMINS_MANAGE: 'admins.manage',
+  SETTINGS_MANAGE: 'settings.manage',
+} as const;

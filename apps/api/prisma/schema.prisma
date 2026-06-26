@@ -1,0 +1,773 @@
+// Telegram group management SaaS - data model
+// Multi-tenant: a Tenant owns Admins + Bots; each Bot manages multiple Groups;
+// every row carries tenantId so tenants are fully isolated from each other.
+
+generator client {
+  provider      = "prisma-client-js"
+  // "native" for local dev; debian target for the node:20-slim containers.
+  // (musl target also kept in case the image is switched back to alpine.)
+  binaryTargets = ["native", "debian-openssl-3.0.x", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+//  Multi-tenant SaaS foundation
+//  Tenant -> Admin (Role -> Permission) -> Bot -> Group
+//  Every Bot/Group/Admin/stat/log row carries tenantId for hard isolation.
+//  Per-group config tables (Welcome/Filter/...) inherit tenancy via Group.
+// ============================================================
+
+enum PlanTier {
+  FREE
+  PRO
+  BUSINESS
+}
+
+// Tenant = the top-level isolation/billing boundary. A tenant owns its admins,
+// bots, groups and all derived data. Nothing crosses tenant boundaries.
+model Tenant {
+  id        String   @id @default(cuid())
+  name      String   @default("Default Tenant")
+  plan      PlanTier @default(FREE)
+  status    String   @default("ACTIVE") // ACTIVE | SUSPENDED
+
+  admins         Admin[]
+  roles          Role[]
+  bots           Bot[]
+  groups         Group[]
+  adminBots      AdminBot[]
+  adminGroups    AdminGroup[]
+  stats          StatDaily[]
+  logs           AdminLog[]
+  scheduledPosts ScheduledPost[]
+  channels       Channel[]
+  ads            Ad[]
+  adClicks       AdClick[]
+  marketingButtons MarketingButton[]
+  messageTemplates MessageTemplate[]
+  templateAssignments TemplateAssignment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Global permission catalog (shared across tenants). Roles reference these.
+model Permission {
+  id        String  @id @default(cuid())
+  key       String  @unique // e.g. groups.view
+  label     String
+  category  String  @default("general")
+  roles     RolePermission[]
+  createdAt DateTime @default(now())
+}
+
+// A role groups a set of permissions. Roles are tenant-scoped (tenantId set);
+// per-admin custom roles are also supported (one role per sub-admin) so the
+// dashboard can toggle individual permissions live.
+model Role {
+  id          String  @id @default(cuid())
+  tenantId    String
+  tenant      Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  key         String  // SUPER_ADMIN | BOT_ADMIN | admin-<adminId> ...
+  name        String
+  isSystem    Boolean @default(false)
+  permissions RolePermission[]
+  admins      Admin[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([tenantId, key])
+}
+
+model RolePermission {
+  id           String     @id @default(cuid())
+  roleId       String
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permissionId String
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+}
+
+// Admin = a dashboard account. Authentication happens against this model.
+// isSuperAdmin => tenant owner (implicitly all permissions within the tenant).
+model Admin {
+  id               String   @id @default(cuid())
+  tenantId         String
+  tenant           Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  email            String   @unique
+  passwordHash     String
+  displayName      String?
+  telegramUserId   String?  @unique // links a Telegram account for "我的群组"
+  telegramUsername String?
+  locale           String   @default("zh")
+
+  roleId           String?
+  role             Role?    @relation(fields: [roleId], references: [id])
+  isSuperAdmin     Boolean  @default(false)
+  active           Boolean  @default(true)
+
+  ownedBots        Bot[]        @relation("BotOwner")
+  adminBots        AdminBot[]
+  adminGroups      AdminGroup[]
+  ownedAds         Ad[]         @relation("AdOwner")
+
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+// Binding: which bots an admin (sub-admin) may manage.
+model AdminBot {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  adminId   String
+  admin     Admin    @relation(fields: [adminId], references: [id], onDelete: Cascade)
+  botId     String
+  bot       Bot      @relation(fields: [botId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([adminId, botId])
+}
+
+// Binding: which groups an admin (sub-admin) may manage (finer-grained than bot).
+model AdminGroup {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  adminId   String
+  admin     Admin    @relation(fields: [adminId], references: [id], onDelete: Cascade)
+  groupId   String
+  group     Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([adminId, groupId])
+}
+
+// ============================================================
+//  Bots (belong to a tenant)
+// ============================================================
+
+// Runtime status of a hosted bot instance.
+enum BotStatus {
+  RUNNING
+  STOPPED
+  OFFLINE // token invalid / failed to connect
+}
+
+model Bot {
+  id             String   @id @default(cuid())
+  tenantId       String
+  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  ownerAdminId   String?
+  ownerAdmin     Admin?   @relation("BotOwner", fields: [ownerAdminId], references: [id], onDelete: SetNull)
+
+  // Telegram identity
+  telegramBotId  String?  @unique // numeric id from getMe
+  username       String?
+  name           String   @default("My Bot")
+  token          String   // bot token from BotFather (store encrypted in prod)
+  webhookSecret  String   @default(cuid()) // path/secret_token used to validate updates
+
+  // bot home (private chat) configuration
+  welcomeHomeText String? // markdown shown on /start in private chat
+  homeMediaType   MediaType @default(NONE)
+  homeMediaUrl    String?
+  defaultLocale   String   @default("zh")
+
+  isActive       Boolean   @default(true)
+  status         BotStatus @default(STOPPED)
+  lastError      String?
+  lastSeenAt     DateTime?
+
+  groups         Group[]
+  adminBots      AdminBot[]
+  channels       Channel[]
+  scheduledPosts ScheduledPost[]
+  ads            Ad[]
+  adClicks       AdClick[]
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+// ============================================================
+//  Groups & per-group configuration
+// ============================================================
+
+enum ChatType {
+  GROUP
+  SUPERGROUP
+  CHANNEL
+}
+
+// Whether the bot is still in the group. LEFT => bot was removed/kicked.
+enum GroupStatus {
+  ACTIVE
+  LEFT
+}
+
+model Group {
+  id             String   @id @default(cuid())
+  tenantId       String
+  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  botId          String
+  bot            Bot      @relation(fields: [botId], references: [id], onDelete: Cascade)
+
+  telegramChatId String   // -100xxxxxxxxxx
+  title          String   @default("Group")
+  type           ChatType @default(SUPERGROUP)
+  memberCount    Int      @default(0)
+  isActive       Boolean  @default(true)
+  status         GroupStatus @default(ACTIVE)
+  leftAt         DateTime?
+
+  welcome        WelcomeMessage?
+  verification   VerificationConfig?
+  channelGate    ChannelGate?
+  filter         FilterConfig?
+  keywords       Keyword[]
+  listEntries    ListEntry[]
+  announcements  Announcement[]
+  autoReplies    AutoReply[]
+  rules          GroupRule?
+  adminGroups    AdminGroup[]
+  adminLogs      AdminLog[]
+  pending        PendingVerification[]
+  stats          StatDaily[]
+  ads            Ad[]
+  adClicks       AdClick[]
+  templateAssignments TemplateAssignment[]
+
+  joinedAt       DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([botId, telegramChatId])
+  @@index([tenantId])
+}
+
+// ---------- Welcome ----------
+
+enum MediaType {
+  NONE
+  PHOTO
+  GIF
+  VIDEO
+}
+
+model WelcomeMessage {
+  id          String   @id @default(cuid())
+  groupId     String   @unique
+  group       Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  enabled     Boolean  @default(true)
+  text        String   @default("Welcome {first_name} to {group_name}!")
+  mediaType   MediaType @default(NONE)
+  mediaUrl    String?
+  deletePreviousOnNewJoin Boolean @default(true)
+  autoDeleteSeconds Int   @default(0) // 0 = never auto delete
+
+  buttons     Button[]
+  updatedAt   DateTime @updatedAt
+}
+
+// ---------- Button editor ----------
+
+enum ButtonType {
+  URL
+  TELEGRAM_GROUP
+  TELEGRAM_CHANNEL
+  BOT
+  SUPPORT
+  CALLBACK
+}
+
+model Button {
+  id          String   @id @default(cuid())
+  // a button can belong to a welcome message (extendable to other targets later)
+  welcomeId   String?
+  welcome     WelcomeMessage? @relation(fields: [welcomeId], references: [id], onDelete: Cascade)
+
+  label       String
+  type        ButtonType @default(URL)
+  url         String?
+  callbackData String?
+  emoji       String?
+  style       String   @default("default") // visual hint for editor
+  row         Int      @default(0) // for "multiple buttons per row"
+  position    Int      @default(0) // order within the row
+  clickCount  Int      @default(0)
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// ---------- Verification ----------
+
+enum VerificationMode {
+  NONE
+  BUTTON
+  MATH
+  CAPTCHA
+  IMAGE
+  TURNSTILE   // placeholder integration
+  RECAPTCHA   // placeholder integration
+}
+
+model VerificationConfig {
+  id              String   @id @default(cuid())
+  groupId         String   @unique
+  group           Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  enabled         Boolean  @default(true)
+  mode            VerificationMode @default(BUTTON)
+  timeoutSeconds  Int      @default(120)
+  failAction      ModerationAction @default(KICK)
+
+  // join gating
+  requireChannelJoin Boolean @default(false)
+  requiredChannel    String? // @channel username
+
+  // risk checks
+  minAccountAgeDays  Int     @default(0)
+  checkUsername      Boolean @default(false)
+  checkAvatar        Boolean @default(false)
+  premiumOnly        Boolean @default(false)
+  aiRiskScoring      Boolean @default(false)
+  aiRiskThreshold    Int     @default(70) // 0-100, above => reject
+
+  updatedAt       DateTime @updatedAt
+}
+
+// "Follow a channel to get unmuted" gate. Fully independent from verification:
+// a new member is muted on join and must join the configured channel, then tap
+// the button so the bot verifies channel membership and lifts the mute.
+// (The bot MUST be an admin of the target channel to check membership.)
+model ChannelGate {
+  id         String  @id @default(cuid())
+  groupId    String  @unique
+  group      Group   @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  enabled    Boolean @default(false)
+  channel    String? // @username, t.me link, or -100... channel id
+  promptText String  @default("👋 欢迎！请先关注我们的频道后，点击下方按钮解除禁言。")
+  buttonText String  @default("✅ 我已关注")
+
+  updatedAt  DateTime @updatedAt
+}
+
+model PendingVerification {
+  id             String   @id @default(cuid())
+  groupId        String
+  group          Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  telegramUserId String
+  challenge      String?  // e.g. math expression
+  answer         String?  // expected answer / token
+  attempts       Int      @default(0)
+  status         String   @default("PENDING") // PENDING | PASSED | FAILED
+  expiresAt      DateTime
+  createdAt      DateTime @default(now())
+
+  @@unique([groupId, telegramUserId])
+}
+
+// ---------- Filters / moderation ----------
+
+enum ModerationAction {
+  NONE
+  DELETE
+  WARN
+  MUTE
+  KICK
+  BAN
+}
+
+model FilterConfig {
+  id            String   @id @default(cuid())
+  groupId       String   @unique
+  group         Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  antiAd        Boolean  @default(true)
+  antiSpam      Boolean  @default(true)
+  linkFilter    Boolean  @default(false)
+  mediaFilter   Boolean  @default(false)
+
+  // anti-flood (防刷屏): disabled by default, toggle in dashboard
+  antiFlood          Boolean @default(false)
+  floodMaxMessages   Int     @default(5)  // messages allowed within the window
+  floodWindowSeconds Int     @default(5)  // sliding window length in seconds
+  floodAction        ModerationAction @default(MUTE) // legacy/simple action (kept for compat)
+  floodMuteSeconds   Int     @default(60) // mute duration for offenses before the ban threshold
+  // escalating punishment: 1st..(N-1)th offense => mute, Nth offense => kick + blacklist
+  floodBanThreshold       Int @default(3)  // offense count that triggers kick + blacklist
+  floodOffenseWindowHours Int @default(24) // how long an offense is remembered (reset window)
+
+  // escalation thresholds
+  warnLimit     Int      @default(3)
+  warnAction    ModerationAction @default(MUTE)
+  muteSeconds   Int      @default(3600)
+
+  updatedAt     DateTime @updatedAt
+}
+
+enum KeywordMatch {
+  CONTAINS
+  EXACT
+  REGEX
+}
+
+model Keyword {
+  id        String   @id @default(cuid())
+  groupId   String
+  group     Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  pattern   String
+  match     KeywordMatch @default(CONTAINS)
+  action    ModerationAction @default(DELETE)
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+}
+
+enum ListType {
+  BLACK
+  WHITE
+}
+
+model ListEntry {
+  id             String   @id @default(cuid())
+  groupId        String
+  group          Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  type           ListType
+  telegramUserId String
+  note           String?
+  createdAt      DateTime @default(now())
+
+  @@unique([groupId, type, telegramUserId])
+}
+
+// ---------- Announcements & auto-reply ----------
+
+model Announcement {
+  id          String   @id @default(cuid())
+  groupId     String
+  group       Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  text        String
+  enabled     Boolean  @default(true)
+  intervalMinutes Int  @default(0) // 0 = manual only
+  lastSentAt  DateTime?
+  createdAt   DateTime @default(now())
+}
+
+model AutoReply {
+  id        String   @id @default(cuid())
+  groupId   String
+  group     Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  trigger   String
+  match     KeywordMatch @default(CONTAINS)
+  response  String
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+}
+
+model GroupRule {
+  id        String   @id @default(cuid())
+  groupId   String   @unique
+  group     Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  text      String   @default("")
+  updatedAt DateTime @updatedAt
+}
+
+// ---------- Logs & stats ----------
+
+model AdminLog {
+  id             String   @id @default(cuid())
+  tenantId       String
+  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  groupId        String
+  group          Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  action         String   // e.g. BAN, MUTE, WELCOME_SENT, AD_BLOCKED, VERIFY_PASS
+  actorId        String?  // telegram user id of admin/bot
+  targetUserId   String?  // telegram user id affected
+  detail         String?
+  createdAt      DateTime @default(now())
+
+  @@index([groupId, createdAt])
+  @@index([tenantId, createdAt])
+}
+
+model StatDaily {
+  id           String   @id @default(cuid())
+  tenantId     String
+  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  groupId      String
+  group        Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  date         DateTime // day granularity (UTC midnight)
+  newMembers   Int      @default(0)
+  verified     Int      @default(0)
+  adsBlocked   Int      @default(0)
+  bans         Int      @default(0)
+  welcomeSent  Int      @default(0)
+  buttonClicks Int      @default(0)
+  activeUsers  Int      @default(0)
+
+  @@unique([groupId, date])
+  @@index([tenantId])
+}
+
+// ============================================================
+//  Scheduled posts (timed custom messages to groups / channels)
+// ============================================================
+
+enum ScheduleType {
+  INTERVAL // every N minutes
+  DAILY    // every day at HH:mm (UTC)
+}
+
+enum PostTargetType {
+  GROUP
+  CHANNEL
+}
+
+// A registered channel the bot can post to (bot must be channel admin).
+model Channel {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  botId     String
+  bot       Bot      @relation(fields: [botId], references: [id], onDelete: Cascade)
+  chatId    String // -100xxxxxxxxxx or @username
+  title     String   @default("Channel")
+  username  String?
+  createdAt DateTime @default(now())
+
+  @@unique([botId, chatId])
+  @@index([tenantId])
+}
+
+model ScheduledPost {
+  id              String         @id @default(cuid())
+  tenantId        String
+  tenant          Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  botId           String
+  bot             Bot            @relation(fields: [botId], references: [id], onDelete: Cascade)
+  targetType      PostTargetType @default(GROUP)
+  targetChatId    String // group chat id or channel id/@username
+  title           String         @default("")
+  text            String
+  scheduleType    ScheduleType   @default(DAILY)
+  intervalMinutes Int            @default(0) // used when scheduleType = INTERVAL
+  dailyTime       String? // "HH:mm" (UTC) used when scheduleType = DAILY
+  enabled         Boolean        @default(true)
+  lastSentAt      DateTime?
+  nextRunAt       DateTime?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  @@index([enabled, nextRunAt])
+  @@index([tenantId])
+}
+
+// ============================================================
+//  Ads (button ad-slots) — tenant scoped, assignable to bot/group/admin
+// ============================================================
+
+// Where an ad's buttons may appear. An ad can target multiple placements.
+enum AdPlacement {
+  WELCOME      // 新人进群欢迎消息下方
+  PRIVATE_MENU // 机器人私聊菜单
+  POST_VERIFY  // 验证完成后的提示消息
+  SCHEDULED    // 群组定时广告消息
+  TEMPLATE     // 管理员指定的群消息模板（手动发送）
+}
+
+model Ad {
+  id           String   @id @default(cuid())
+  tenantId     String
+  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  title        String   @default("")
+  body         String   @default("") // ad copy shown with the buttons
+  enabled      Boolean  @default(true)
+  placements   AdPlacement[]
+
+  // assignment (compliance: ad only shows where it is authorized)
+  botId        String?
+  bot          Bot?     @relation(fields: [botId], references: [id], onDelete: SetNull)
+  groupId      String?
+  group        Group?   @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  ownerAdminId String?
+  ownerAdmin   Admin?   @relation("AdOwner", fields: [ownerAdminId], references: [id], onDelete: SetNull)
+
+  // scheduling (used when placements contains SCHEDULED)
+  intervalMinutes Int   @default(0)
+  lastSentAt   DateTime?
+
+  // active window
+  startAt      DateTime?
+  endAt        DateTime?
+
+  // aggregate counters
+  impressions  Int      @default(0)
+  clicks       Int      @default(0)
+
+  buttons      AdButton[]
+  clickLogs    AdClick[]
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([tenantId])
+  @@index([botId])
+  @@index([groupId])
+}
+
+// One inline-keyboard button of an ad (label + target url).
+model AdButton {
+  id        String   @id @default(cuid())
+  adId      String
+  ad        Ad       @relation(fields: [adId], references: [id], onDelete: Cascade)
+  label     String
+  url       String
+  row       Int      @default(0)
+  position  Int      @default(0)
+  clicks    Int      @default(0)
+  createdAt DateTime @default(now())
+
+  clickLogs AdClick[]
+
+  @@index([adId])
+}
+
+// One recorded click (who/when/where) for ad effectiveness reporting.
+model AdClick {
+  id             String   @id @default(cuid())
+  tenantId       String
+  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  adId           String
+  ad             Ad       @relation(fields: [adId], references: [id], onDelete: Cascade)
+  buttonId       String?
+  button         AdButton? @relation(fields: [buttonId], references: [id], onDelete: SetNull)
+  botId          String?
+  bot            Bot?     @relation(fields: [botId], references: [id], onDelete: SetNull)
+  groupId        String?
+  group          Group?   @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  telegramUserId String?
+  createdAt      DateTime @default(now())
+
+  @@index([adId, createdAt])
+  @@index([tenantId, createdAt])
+}
+
+// ============================================================
+//  Marketing Center — global button library + component templates
+// ============================================================
+
+// How a marketing button resolves into a Telegram inline button.
+enum ButtonLinkType {
+  URL      // raw https url
+  USER     // @username / user link -> https://t.me/<username>
+  GROUP    // group @username / invite link
+  CHANNEL  // channel @username / invite link
+  MINIAPP  // mini app (opened as a url button)
+}
+
+// Global, reusable button. Never hard-coded: every keyboard can reference these.
+model MarketingButton {
+  id          String         @id @default(cuid())
+  tenantId    String
+  tenant      Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  name        String         // backend identifier (e.g. 西安会所推广001)
+  displayName String         // user-facing label (e.g. 西安98/95会所)
+  emoji       String?        // optional leading emoji
+  linkType    ButtonLinkType @default(URL)
+  target      String         // url / @username / chat id / miniapp url
+
+  sort        Int            @default(0)
+  enabled     Boolean        @default(true)
+
+  // optional binding/scoping (null => available tenant-wide)
+  botId        String?
+  groupId      String?
+  ownerAdminId String?
+
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@index([tenantId])
+}
+
+// Component-based message template. Every bot message can be rendered from one
+// of these instead of hard-coded formatting. `components` is an ordered JSON
+// array of typed blocks (TEXT/IMAGE/VIDEO/GIF/FILE/BUTTONS/AD/CHANNEL_CARD/...).
+model MessageTemplate {
+  id           String   @id @default(cuid())
+  tenantId     String
+  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  name         String
+  kind         String   @default("GENERIC") // WELCOME|VERIFY|AUTO_REPLY|SCHEDULED|ANNOUNCEMENT|AD|GENERIC
+  components    Json     @default("[]")
+  enabled      Boolean  @default(true)
+
+  // optional binding/scoping (null => available tenant-wide)
+  botId        String?
+  groupId      String?
+  ownerAdminId String?
+
+  assignments  TemplateAssignment[]
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([tenantId])
+  @@index([kind])
+}
+
+// Batch application of a template to a specific group, with per-group enable
+// flag and optional group-level overrides (disable buttons / replace content).
+// Priority at render time: group assignment > bot-default template > tenant-default.
+model TemplateAssignment {
+  id          String          @id @default(cuid())
+  tenantId    String
+  tenant      Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  templateId  String
+  template    MessageTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  groupId     String
+  group       Group           @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  enabled     Boolean         @default(true)
+  // { disabledButtonIds: string[], components?: Component[] }
+  overrides   Json            @default("{}")
+
+  impressions Int             @default(0)
+  clicks      Int             @default(0)
+
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@unique([templateId, groupId])
+  @@index([tenantId])
+  @@index([groupId])
+}
+
+// One recorded click of a template (marketing-button) for per-group analytics.
+model TemplateClick {
+  id                String   @id @default(cuid())
+  tenantId          String
+  templateId        String
+  assignmentId      String?
+  marketingButtonId String?
+  botId             String?
+  groupId           String?
+  telegramUserId    String?
+  createdAt         DateTime @default(now())
+
+  @@index([templateId, createdAt])
+  @@index([groupId, createdAt])
+  @@index([tenantId, createdAt])
+}
