@@ -16,6 +16,8 @@ import {
   UpdateRuleDto,
   CreateTargetDto,
   UpdateTargetDto,
+  CreateBotWhitelistDto,
+  UpdateBotWhitelistDto,
 } from './dto';
 
 @Injectable()
@@ -387,6 +389,74 @@ export class ListenerService {
     const t = await this.prisma.listenerPushTarget.findFirst({ where: { id, tenantId: ctx.tenantId } });
     if (!t) throw new NotFoundException('推送目标不存在');
     await this.prisma.listenerPushTarget.delete({ where: { id } });
+    await this.gateway.reload();
+    return { ok: true };
+  }
+
+  // ---------------- bot whitelist (forward only bots / listed senders) ----------------
+
+  async listBotWhitelist(userId: string) {
+    const ctx = await this.rbac.context(userId);
+    return this.prisma.listenerBotWhitelist.findMany({
+      where: { tenantId: ctx.tenantId },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  private cleanUsername(v?: string): string | null {
+    const s = (v || '').trim().replace(/^@+/, '').toLowerCase();
+    return s || null;
+  }
+
+  async createBotWhitelist(userId: string, dto: CreateBotWhitelistDto) {
+    const ctx = await this.rbac.context(userId);
+    if (!this.rbac.has(ctx, PERMISSIONS.LISTENER_RULE)) {
+      throw new ForbiddenException('没有管理监控机器人名单的权限');
+    }
+    const username = this.cleanUsername(dto.username);
+    const uid = (dto.userId || '').trim() || null;
+    if (!username && !uid) throw new BadRequestException('请至少填写 @用户名 或 用户ID');
+    const row = await this.prisma.listenerBotWhitelist.create({
+      data: {
+        tenantId: ctx.tenantId,
+        label: dto.label || '',
+        username,
+        userId: uid,
+        enabled: dto.enabled ?? true,
+      },
+    });
+    await this.gateway.reload();
+    return row;
+  }
+
+  async updateBotWhitelist(userId: string, id: string, dto: UpdateBotWhitelistDto) {
+    const ctx = await this.rbac.context(userId);
+    if (!this.rbac.has(ctx, PERMISSIONS.LISTENER_RULE)) {
+      throw new ForbiddenException('没有管理监控机器人名单的权限');
+    }
+    const row = await this.prisma.listenerBotWhitelist.findFirst({ where: { id, tenantId: ctx.tenantId } });
+    if (!row) throw new NotFoundException('名单项不存在');
+    const updated = await this.prisma.listenerBotWhitelist.update({
+      where: { id },
+      data: {
+        ...(dto.label !== undefined ? { label: dto.label } : {}),
+        ...(dto.username !== undefined ? { username: this.cleanUsername(dto.username) } : {}),
+        ...(dto.userId !== undefined ? { userId: (dto.userId || '').trim() || null } : {}),
+        ...(dto.enabled !== undefined ? { enabled: dto.enabled } : {}),
+      },
+    });
+    await this.gateway.reload();
+    return updated;
+  }
+
+  async removeBotWhitelist(userId: string, id: string) {
+    const ctx = await this.rbac.context(userId);
+    if (!this.rbac.has(ctx, PERMISSIONS.LISTENER_RULE)) {
+      throw new ForbiddenException('没有管理监控机器人名单的权限');
+    }
+    const row = await this.prisma.listenerBotWhitelist.findFirst({ where: { id, tenantId: ctx.tenantId } });
+    if (!row) throw new NotFoundException('名单项不存在');
+    await this.prisma.listenerBotWhitelist.delete({ where: { id } });
     await this.gateway.reload();
     return { ok: true };
   }

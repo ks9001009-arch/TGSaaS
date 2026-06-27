@@ -26,6 +26,8 @@ import {
   UpdateRuleDto,
   CreateTargetDto,
   UpdateTargetDto,
+  CreateBotWhitelistDto,
+  UpdateBotWhitelistDto,
 } from './dto';
 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -168,6 +170,31 @@ export class ListenerController {
   @RequirePermissions(PERMISSIONS.LISTENER_PUSH)
   removeTarget(@CurrentUser() u: AuthUser, @Param('id') id: string) {
     return this.listener.removeTarget(u.userId, id);
+  }
+
+  // ---- bot whitelist (forward only bots / listed senders) ----
+  @Get('bots')
+  @RequirePermissions(PERMISSIONS.LISTENER_VIEW)
+  listBotWhitelist(@CurrentUser() u: AuthUser) {
+    return this.listener.listBotWhitelist(u.userId);
+  }
+
+  @Post('bots')
+  @RequirePermissions(PERMISSIONS.LISTENER_RULE)
+  createBotWhitelist(@CurrentUser() u: AuthUser, @Body() dto: CreateBotWhitelistDto) {
+    return this.listener.createBotWhitelist(u.userId, dto);
+  }
+
+  @Patch('bots/:id')
+  @RequirePermissions(PERMISSIONS.LISTENER_RULE)
+  updateBotWhitelist(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: UpdateBotWhitelistDto) {
+    return this.listener.updateBotWhitelist(u.userId, id, dto);
+  }
+
+  @Delete('bots/:id')
+  @RequirePermissions(PERMISSIONS.LISTENER_RULE)
+  removeBotWhitelist(@CurrentUser() u: AuthUser, @Param('id') id: string) {
+    return this.listener.removeBotWhitelist(u.userId, id);
   }
 
   // ---- hits & stats ----

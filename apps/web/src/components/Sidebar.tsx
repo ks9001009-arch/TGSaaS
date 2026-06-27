@@ -85,6 +85,7 @@ export default function Sidebar() {
           { href: '/dashboard/listener/groups', label: '监听群组', icon: Users, show: isSuper || can(PERM.LISTENER_VIEW) || can(PERM.LISTENER_GROUP) },
           { href: '/dashboard/listener/rules', label: '关键词规则', icon: KeyRound, show: isSuper || can(PERM.LISTENER_VIEW) || can(PERM.LISTENER_RULE) },
           { href: '/dashboard/listener/targets', label: '推送目标', icon: Send, show: isSuper || can(PERM.LISTENER_VIEW) || can(PERM.LISTENER_PUSH) },
+          { href: '/dashboard/listener/bots', label: '监控机器人名单', icon: Bot, show: isSuper || can(PERM.LISTENER_VIEW) || can(PERM.LISTENER_RULE) },
           { href: '/dashboard/listener/hits', label: '命中记录', icon: ListChecks, show: isSuper || can(PERM.LISTENER_STATS) },
         ],
       },

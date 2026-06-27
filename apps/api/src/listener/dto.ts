@@ -172,3 +172,44 @@ export class UpdateTargetDto {
   @IsBoolean()
   enabled?: boolean;
 }
+
+export class CreateBotWhitelistDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  label?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  username?: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^[0-9]{3,20}$/, { message: '用户ID 必须是纯数字' })
+  userId?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  enabled?: boolean;
+}
+
+export class UpdateBotWhitelistDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  label?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  username?: string;
+
+  @IsOptional()
+  @IsString()
+  userId?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  enabled?: boolean;
+}

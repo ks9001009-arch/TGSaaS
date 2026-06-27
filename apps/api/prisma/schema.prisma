@@ -56,7 +56,9 @@ model Tenant {
   listenerHits     ListenerHit[]
   listenerPushTargets ListenerPushTarget[]
   listenerPushLogs ListenerPushLog[]
+  listenerBotWhitelists ListenerBotWhitelist[]
   adminListeners   AdminListener[]
+  ledgerBooks      LedgerBook[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -251,6 +253,7 @@ model Group {
   ads            Ad[]
   adClicks       AdClick[]
   templateAssignments TemplateAssignment[]
+  ledger         LedgerBook?
 
   joinedAt       DateTime @default(now())
   updatedAt      DateTime @updatedAt
@@ -967,4 +970,84 @@ model ListenerPushLog {
 
   @@unique([sourceChatId, messageId, targetId])
   @@index([tenantId, createdAt])
+}
+
+// Forward whitelist for the listener. A matched message is only forwarded when
+// its sender is a Bot OR is listed here (by @username and/or numeric user id).
+// Lets the operator add userbot-based welcome/verify senders that Telegram does
+// not flag as bots. Precondition: the listener account is in that group.
+model ListenerBotWhitelist {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  label     String   @default("")
+  username  String?  // without leading @, stored lowercased
+  userId    String?  // numeric telegram user id (as string)
+  enabled   Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId])
+}
+
+// ============================================================
+//  Ledger Center — 群组实时记账（操作人/费率/汇率/入款/下发/账单）
+//  独立模块：仅在某群「开启记账」后生效；未开启的群完全不受影响。
+//  入款金额按原币种记录；下发(已下发)按目标币种(默认 USDT)记录。
+//  应下发 = 总入款 × (1 − 费率) ÷ 汇率；未下发 = 应下发 − 已下发。
+// ============================================================
+
+enum LedgerEntryType {
+  IN  // 入款
+  OUT // 下发 / 出款
+}
+
+model LedgerBook {
+  id              String   @id @default(cuid())
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  groupId         String   @unique
+  group           Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  enabled         Boolean  @default(true)
+  feeRate         Float    @default(0) // 0.05 = 5%
+  exchangeRate    Float    @default(1) // 目标币种换算汇率
+  currency        String   @default("USDT")
+  periodStartedAt DateTime @default(now())
+
+  operators       LedgerOperator[]
+  entries         LedgerEntry[]
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([tenantId])
+}
+
+model LedgerOperator {
+  id        String     @id @default(cuid())
+  bookId    String
+  book      LedgerBook @relation(fields: [bookId], references: [id], onDelete: Cascade)
+  userId    String     // telegram user id
+  name      String     @default("")
+  createdAt DateTime   @default(now())
+
+  @@unique([bookId, userId])
+}
+
+model LedgerEntry {
+  id           String          @id @default(cuid())
+  bookId       String
+  book         LedgerBook      @relation(fields: [bookId], references: [id], onDelete: Cascade)
+  type         LedgerEntryType
+  amount       Float
+  operatorId   String?         // telegram user id of the recording operator
+  operatorName String          @default("")
+  note         String          @default("")
+  revoked      Boolean         @default(false)
+  createdAt    DateTime        @default(now())
+
+  @@index([bookId, createdAt])
 }

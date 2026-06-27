@@ -114,6 +114,11 @@ class Database:
             'SELECT id, "tenantId", type, "chatId", mode FROM "ListenerPushTarget" WHERE enabled = true'
         )
 
+    async def fetch_bot_whitelist(self) -> list[asyncpg.Record]:
+        return await self.pool.fetch(
+            'SELECT "tenantId", username, "userId" FROM "ListenerBotWhitelist" WHERE enabled = true'
+        )
+
     # ---------- hits / push logs ----------
     async def insert_hit(self, **f) -> None:
         await self.pool.execute(
