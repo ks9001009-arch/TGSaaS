@@ -28,6 +28,8 @@ import {
   ListChecks,
   ServerCog,
   KeySquare,
+  AtSign,
+  SlidersHorizontal,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { useAccess, PERM } from '@/lib/access';
@@ -87,6 +89,15 @@ export default function Sidebar() {
           { href: '/dashboard/listener/targets', label: '推送目标', icon: Send, show: isSuper || can(PERM.LISTENER_VIEW) || can(PERM.LISTENER_PUSH) },
           { href: '/dashboard/listener/bots', label: '监控机器人名单', icon: Bot, show: isSuper || can(PERM.LISTENER_VIEW) || can(PERM.LISTENER_RULE) },
           { href: '/dashboard/listener/hits', label: '命中记录', icon: ListChecks, show: isSuper || can(PERM.LISTENER_STATS) },
+        ],
+      },
+      {
+        id: 'collection',
+        title: '采集中心',
+        icon: AtSign,
+        items: [
+          { href: '/dashboard/collection', label: '采集记录 / 查询', icon: ListChecks, show: isSuper || can(PERM.COLLECTION_VIEW) },
+          { href: '/dashboard/collection/settings', label: '采集设置', icon: SlidersHorizontal, show: isSuper || can(PERM.COLLECTION_MANAGE) },
         ],
       },
       {

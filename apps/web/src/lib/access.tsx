@@ -166,6 +166,9 @@ export const PERM = {
   LISTENER_RULE: 'listener.rule',
   LISTENER_PUSH: 'listener.push',
   LISTENER_STATS: 'listener.stats',
+  // IG/TK collection
+  COLLECTION_VIEW: 'collection.view',
+  COLLECTION_MANAGE: 'collection.manage',
   // system
   ADMINS_MANAGE: 'admins.manage',
   SETTINGS_MANAGE: 'settings.manage',
