@@ -17,6 +17,7 @@ import { AdsModule } from './ads/ads.module';
 import { MarketingModule } from './marketing/marketing.module';
 import { ListenerModule } from './listener/listener.module';
 import { SystemModule } from './system/system.module';
+import { CollectionModule } from './collection/collection.module';
 import { HealthController } from './health.controller';
 
 @Module({
@@ -39,6 +40,7 @@ import { HealthController } from './health.controller';
     MarketingModule,
     ListenerModule,
     SystemModule,
+    CollectionModule,
   ],
   controllers: [HealthController],
 })

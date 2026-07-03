@@ -7,6 +7,7 @@ import { renderText, buildKeyboard } from './render.util';
 import { makeMathChallenge, makeCaptchaChallenge, makeButtonChallenge } from './verification.util';
 import { matchKeyword, looksLikeAd, looksLikeLink } from './moderation.util';
 import { t, normalizeLocale, Locale } from '../i18n/locales';
+import { CollectionService } from '../collection/collection.service';
 
 @Injectable()
 export class TelegramService {
@@ -16,6 +17,7 @@ export class TelegramService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
+    private readonly collection: CollectionService,
   ) {}
 
   // ---------- per-user locale (private chat) ----------
@@ -229,6 +231,7 @@ export class TelegramService {
     bot.on('message:users_shared', (ctx) => this.onUsersShared(ctx, botId));
     bot.on('callback_query:data', (ctx) => this.onCallback(ctx, botId));
     bot.on('message:text', (ctx) => this.onMessage(ctx, botId));
+    bot.on('message:photo', (ctx) => this.onPhoto(ctx, botId));
 
     bot.catch((err) => this.logger.error(`grammY error: ${err.message}`));
   }
@@ -391,7 +394,7 @@ export class TelegramService {
     // isActive: only when the bot is an admin (otherwise tasks stay paused).
     const groupStatus = inGroup ? 'ACTIVE' : 'LEFT';
 
-    await this.prisma.group.upsert({
+    const groupRow = await this.prisma.group.upsert({
       where: { botId_telegramChatId: { botId, telegramChatId: String(chat.id) } },
       create: {
         tenantId: botRow.tenantId,
@@ -415,6 +418,11 @@ export class TelegramService {
         title: (chat as any).title || undefined,
       },
     });
+
+    // Seed the IG/TK collection switch for a newly-joined group (tenant default).
+    if (justAdded) {
+      await this.collection.ensureConfig(botRow.tenantId, groupRow.id).catch(() => undefined);
+    }
     this.logger.log(
       `Bot ${botId} membership in chat ${chat.id}: ${oldStatus} -> ${status}` +
         (justLeft ? ' (left -> group LEFT, tasks paused)' : '') +
@@ -1222,8 +1230,28 @@ export class TelegramService {
 
   // ---------- message moderation ----------
 
+  // Photo messages: only the collection feature cares about these (screenshots
+  // in groups, screenshot queries in private).
+  private async onPhoto(ctx: Context, botId: string) {
+    if (ctx.chat?.type === 'private') {
+      await this.collection.onPrivateMessage(botId, ctx).catch(() => undefined);
+      return;
+    }
+    await this.collection.onGroupMessage(botId, ctx).catch(() => undefined);
+  }
+
   private async onMessage(ctx: Context, botId: string) {
-    if (!ctx.chat || ctx.chat.type === 'private') return;
+    // Private chat: IG/TK query for authorized admins (no-op otherwise).
+    if (ctx.chat?.type === 'private') {
+      await this.collection.onPrivateMessage(botId, ctx).catch(() => undefined);
+      return;
+    }
+    if (!ctx.chat) return;
+
+    // IG/TK collection runs first so captured data survives even if moderation
+    // later deletes the message. Safe no-op when collection is disabled.
+    await this.collection.onGroupMessage(botId, ctx).catch(() => undefined);
+
     const text = ctx.message?.text || '';
     if (!text) return;
 

@@ -60,6 +60,10 @@ export const PERMISSIONS = {
   LISTENER_PUSH: 'listener.push',         // 管理推送目标
   LISTENER_STATS: 'listener.stats',       // 查看监听统计 / 命中记录
 
+  // ---- IG/TK collection ----
+  COLLECTION_VIEW: 'collection.view',     // 查看采集记录 / 私聊查询
+  COLLECTION_MANAGE: 'collection.manage', // 管理采集开关
+
   // ---- system ----
   ADMINS_MANAGE: 'admins.manage',     // 管理管理员
   SETTINGS_MANAGE: 'settings.manage', // 系统设置
@@ -135,6 +139,9 @@ export const PERMISSION_CATALOG: { key: PermissionKey; label: string; category: 
   { key: PERMISSIONS.LISTENER_RULE, label: '管理关键词规则', category: 'listener' },
   { key: PERMISSIONS.LISTENER_PUSH, label: '管理推送目标', category: 'listener' },
   { key: PERMISSIONS.LISTENER_STATS, label: '查看监听统计', category: 'listener' },
+
+  { key: PERMISSIONS.COLLECTION_VIEW, label: '查看采集/查询', category: 'collection' },
+  { key: PERMISSIONS.COLLECTION_MANAGE, label: '管理采集开关', category: 'collection' },
 
   { key: PERMISSIONS.ADMINS_MANAGE, label: '管理管理员', category: 'system' },
   { key: PERMISSIONS.SETTINGS_MANAGE, label: '系统设置', category: 'system' },
@@ -212,6 +219,13 @@ export const PERMISSION_GROUPS: {
       { key: PERMISSIONS.AD_ASSIGN_BOT, label: '给机器人分配广告' },
       { key: PERMISSIONS.AD_ASSIGN_GROUP, label: '给群组分配广告' },
       { key: PERMISSIONS.AD_STATS, label: '查看广告统计' },
+    ],
+  },
+  {
+    label: 'IG/TK 采集',
+    items: [
+      { key: PERMISSIONS.COLLECTION_VIEW, label: '查看采集/查询' },
+      { key: PERMISSIONS.COLLECTION_MANAGE, label: '管理采集开关' },
     ],
   },
   {
