@@ -11,3 +11,21 @@ export class SetTelegramApiDto {
   @IsString()
   apiHash?: string;
 }
+
+export class SetOcrDto {
+  @IsOptional()
+  @IsString()
+  provider?: string;
+
+  @IsOptional()
+  @IsString()
+  lang?: string;
+
+  @IsOptional()
+  @IsString()
+  ocrspaceUserId?: string;
+
+  @IsOptional()
+  @IsString()
+  ocrspaceApiKey?: string;
+}

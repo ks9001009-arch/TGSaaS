@@ -57,6 +57,10 @@ services:
       RECAPTCHA_SECRET_KEY: ${RECAPTCHA_SECRET_KEY}
       AI_RISK_PROVIDER: ${AI_RISK_PROVIDER}
       AI_RISK_API_KEY: ${AI_RISK_API_KEY}
+      OCR_PROVIDER: ${OCR_PROVIDER:-tesseract}
+      OCRSPACE_USER_ID: ${OCRSPACE_USER_ID:-}
+      OCRSPACE_API_KEY: ${OCRSPACE_API_KEY:-}
+      OCR_LANG: ${OCR_LANG:-eng}
       # Listener Center (MTProto) integration
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
       LISTENER_URL: ${LISTENER_URL:-http://listener:8100}
