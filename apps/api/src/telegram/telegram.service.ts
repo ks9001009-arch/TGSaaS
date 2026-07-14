@@ -227,6 +227,10 @@ export class TelegramService {
 
     bot.on('my_chat_member', (ctx) => this.onMyChatMember(ctx, botId));
     bot.on('message:new_chat_members', (ctx) => this.onNewMembers(ctx, botId));
+    // Fallback join detection: supergroups often deliver only chat_member
+    // updates (no new_chat_members service message), e.g. when the member
+    // list is hidden. Redis dedupe in handleMemberJoined prevents double runs.
+    bot.on('chat_member', (ctx) => this.onChatMember(ctx, botId));
     // user picked via the "share a friend" button (Bot API 7.0+: users_shared)
     bot.on('message:users_shared', (ctx) => this.onUsersShared(ctx, botId));
     bot.on('callback_query:data', (ctx) => this.onCallback(ctx, botId));
@@ -447,28 +451,93 @@ export class TelegramService {
 
   private async onNewMembers(ctx: Context, botId: string) {
     if (!ctx.chat) return;
-    const group = await this.loadGroup(botId, String(ctx.chat.id));
-    if (!group) return;
-
     const newMembers = ctx.message?.new_chat_members || [];
+    this.logger.log(
+      `[join] new_chat_members received: bot=${botId} chat=${ctx.chat.id} users=[${newMembers
+        .map((m) => m.id)
+        .join(', ')}]`,
+    );
+    const group = await this.loadGroup(botId, String(ctx.chat.id));
+    if (!group) {
+      this.logger.warn(
+        `[join] loadGroup returned null for bot=${botId} chat=${ctx.chat.id} (new_chat_members ignored)`,
+      );
+      return;
+    }
+
     for (const member of newMembers) {
-      if (member.is_bot) continue;
-      await this.incStat(group.id, 'newMembers');
+      await this.handleMemberJoined(ctx, group, member, 'new_chat_members');
+    }
+  }
 
-      const v = group.verification;
-      const cg = group.channelGate;
-      const verifyOn = v && v.enabled !== false && v.mode !== 'NONE';
-      const gateOn = cg && cg.enabled && cg.channel;
+  // Fallback join detection via chat_member updates. Only reacts to a real
+  // "join" transition: old status outside the chat -> new status inside it.
+  private async onChatMember(ctx: Context, botId: string) {
+    const upd = ctx.chatMember;
+    if (!upd || !ctx.chat || ctx.chat.type === 'private') return;
 
-      // Independent gates that compose: verification runs first (if on); once it
-      // passes, the channel-follow gate runs (if on). If neither is on -> welcome.
-      if (verifyOn) {
-        await this.startVerification(ctx, group, member);
-      } else if (gateOn) {
-        await this.startChannelGate(ctx, group, member);
-      } else {
-        await this.sendWelcome(ctx, group, member);
+    const oldStatus = upd.old_chat_member.status;
+    const newStatus = upd.new_chat_member.status;
+    this.logger.log(
+      `[join] chat_member update: bot=${botId} chat=${ctx.chat.id} user=${upd.new_chat_member.user.id} ${oldStatus} -> ${newStatus}`,
+    );
+
+    const wasInChat = ['member', 'administrator', 'creator', 'restricted'].includes(oldStatus);
+    const isInChat = ['member', 'administrator', 'creator', 'restricted'].includes(newStatus);
+    if (wasInChat || !isInChat) return;
+
+    const group = await this.loadGroup(botId, String(ctx.chat.id));
+    if (!group) {
+      this.logger.warn(
+        `[join] loadGroup returned null for bot=${botId} chat=${ctx.chat.id} (chat_member ignored)`,
+      );
+      return;
+    }
+
+    await this.handleMemberJoined(ctx, group, upd.new_chat_member.user, 'chat_member');
+  }
+
+  // Unified join pipeline shared by new_chat_members and chat_member. A short
+  // Redis lock makes it idempotent, since Telegram may deliver both updates
+  // for the same join.
+  private async handleMemberJoined(ctx: Context, group: any, member: any, source: string) {
+    if (!member || member.is_bot) return;
+
+    const dedupeKey = `joined:${group.id}:${member.id}`;
+    try {
+      const acquired = await this.redis.client.set(dedupeKey, source, 'EX', 10, 'NX');
+      if (!acquired) {
+        this.logger.log(
+          `[join] duplicate join for group=${group.id} user=${member.id} (source=${source}), skipped`,
+        );
+        return;
       }
+    } catch (e: any) {
+      // if Redis is down we still process the join (risk: rare duplicate welcome)
+      this.logger.warn(`[join] dedupe redis error: ${e.message}`);
+    }
+
+    this.logger.log(
+      `[join] processing new member: group=${group.id} chat=${group.telegramChatId} user=${member.id} source=${source}`,
+    );
+    await this.incStat(group.id, 'newMembers');
+
+    const v = group.verification;
+    const cg = group.channelGate;
+    const verifyOn = v && v.enabled !== false && v.mode !== 'NONE';
+    const gateOn = cg && cg.enabled && cg.channel;
+
+    // Independent gates that compose: verification runs first (if on); once it
+    // passes, the channel-follow gate runs (if on). If neither is on -> welcome.
+    if (verifyOn) {
+      this.logger.log(`[join] branch=verification group=${group.id} user=${member.id}`);
+      await this.startVerification(ctx, group, member);
+    } else if (gateOn) {
+      this.logger.log(`[join] branch=channelGate group=${group.id} user=${member.id}`);
+      await this.startChannelGate(ctx, group, member);
+    } else {
+      this.logger.log(`[join] branch=welcome group=${group.id} user=${member.id}`);
+      await this.sendWelcome(ctx, group, member);
     }
   }
 
