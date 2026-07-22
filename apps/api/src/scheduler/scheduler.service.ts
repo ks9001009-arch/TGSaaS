@@ -117,6 +117,7 @@ export class SchedulerService {
   // Failures keep the previous DB value (handled inside syncMemberCount).
   @Cron(CronExpression.EVERY_10_MINUTES)
   async syncMemberCounts() {
+    this.logger.log('[memberCount] cron started');
     const groups = await this.prisma.group.findMany({
       where: { status: 'ACTIVE' },
       select: { id: true, botId: true, telegramChatId: true },
@@ -124,6 +125,7 @@ export class SchedulerService {
     if (!groups.length) return;
     this.logger.log(`[memberCount] cron sync starting for ${groups.length} ACTIVE group(s)`);
     for (const g of groups) {
+      this.logger.log('[memberCount] syncing group=' + g.id);
       await this.telegram.syncMemberCount(g.botId, g.id, g.telegramChatId);
     }
   }

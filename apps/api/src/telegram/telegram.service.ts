@@ -1561,6 +1561,9 @@ export class TelegramService {
     groupId: string,
     telegramChatId: string,
   ): Promise<number | null> {
+    this.logger.log(
+      `[memberCount] enter syncMemberCount bot=${botId} group=${groupId} chat=${telegramChatId}`,
+    );
     try {
       const record = await this.prisma.bot.findUnique({ where: { id: botId } });
       if (!record) {
