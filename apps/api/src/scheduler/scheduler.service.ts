@@ -1,16 +1,22 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { TelegramService } from '../telegram/telegram.service';
 
 @Injectable()
-export class SchedulerService {
+export class SchedulerService implements OnModuleInit {
   private readonly logger = new Logger(SchedulerService.name);
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly telegram: TelegramService,
-  ) {}
+  ) {
+    this.logger.log('[memberCount] SchedulerService constructed');
+  }
+
+  onModuleInit() {
+    this.logger.log('[memberCount] SchedulerService onModuleInit');
+  }
 
   // Compute the next run time for a post given its schedule.
   computeNextRun(post: {
