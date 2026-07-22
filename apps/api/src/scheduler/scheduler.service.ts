@@ -112,4 +112,19 @@ export class SchedulerService {
       await this.prisma.ad.update({ where: { id: ad.id }, data: { lastSentAt: now } });
     }
   }
+
+  // Refresh Group.memberCount from Telegram for every ACTIVE group.
+  // Failures keep the previous DB value (handled inside syncMemberCount).
+  @Cron(CronExpression.EVERY_10_MINUTES)
+  async syncMemberCounts() {
+    const groups = await this.prisma.group.findMany({
+      where: { status: 'ACTIVE' },
+      select: { id: true, botId: true, telegramChatId: true },
+    });
+    if (!groups.length) return;
+    this.logger.log(`[memberCount] cron sync starting for ${groups.length} ACTIVE group(s)`);
+    for (const g of groups) {
+      await this.telegram.syncMemberCount(g.botId, g.id, g.telegramChatId);
+    }
+  }
 }

@@ -426,6 +426,8 @@ export class TelegramService {
     // Seed the IG/TK collection switch for a newly-joined group (tenant default).
     if (justAdded) {
       await this.collection.ensureConfig(botRow.tenantId, groupRow.id).catch(() => undefined);
+      // Pull the real Telegram member count as soon as the bot joins.
+      await this.syncMemberCount(botId, groupRow.id, groupRow.telegramChatId);
     }
     this.logger.log(
       `Bot ${botId} membership in chat ${chat.id}: ${oldStatus} -> ${status}` +
@@ -529,15 +531,21 @@ export class TelegramService {
 
     // Independent gates that compose: verification runs first (if on); once it
     // passes, the channel-follow gate runs (if on). If neither is on -> welcome.
-    if (verifyOn) {
-      this.logger.log(`[join] branch=verification group=${group.id} user=${member.id}`);
-      await this.startVerification(ctx, group, member);
-    } else if (gateOn) {
-      this.logger.log(`[join] branch=channelGate group=${group.id} user=${member.id}`);
-      await this.startChannelGate(ctx, group, member);
-    } else {
-      this.logger.log(`[join] branch=welcome group=${group.id} user=${member.id}`);
-      await this.sendWelcome(ctx, group, member);
+    // Member-count sync runs in finally so a branch failure still refreshes
+    // the count, without swallowing the original error.
+    try {
+      if (verifyOn) {
+        this.logger.log(`[join] branch=verification group=${group.id} user=${member.id}`);
+        await this.startVerification(ctx, group, member);
+      } else if (gateOn) {
+        this.logger.log(`[join] branch=channelGate group=${group.id} user=${member.id}`);
+        await this.startChannelGate(ctx, group, member);
+      } else {
+        this.logger.log(`[join] branch=welcome group=${group.id} user=${member.id}`);
+        await this.sendWelcome(ctx, group, member);
+      }
+    } finally {
+      await this.syncMemberCount(group.botId, group.id, group.telegramChatId);
     }
   }
 
@@ -1542,6 +1550,51 @@ export class TelegramService {
   }
 
   // ---------- helpers ----------
+
+  /**
+   * Refresh Group.memberCount via Telegram getChatMemberCount.
+   * On failure, keeps the previous DB value and logs a warning.
+   * Returns the new count, or null if the sync failed / bot missing.
+   */
+  async syncMemberCount(
+    botId: string,
+    groupId: string,
+    telegramChatId: string,
+  ): Promise<number | null> {
+    try {
+      const record = await this.prisma.bot.findUnique({ where: { id: botId } });
+      if (!record) {
+        this.logger.warn(
+          `[memberCount] bot ${botId} not found, skip sync for group=${groupId}`,
+        );
+        return null;
+      }
+      const bot = await this.getInstance(record);
+      const count = await bot.api.getChatMemberCount(telegramChatId);
+      // Constrain by both id and botId so a mismatched caller cannot update
+      // another bot's group. updateMany accepts non-unique compound where;
+      // Group.id alone is unique, but (id, botId) is not a @@unique.
+      const result = await this.prisma.group.updateMany({
+        where: { id: groupId, botId },
+        data: { memberCount: count },
+      });
+      if (result.count === 0) {
+        this.logger.warn(
+          `[memberCount] no row matched group=${groupId} bot=${botId}, skipped write (count=${count})`,
+        );
+        return null;
+      }
+      this.logger.log(
+        `[memberCount] group=${groupId} chat=${telegramChatId} synced to ${count}`,
+      );
+      return count;
+    } catch (e: any) {
+      this.logger.warn(
+        `[memberCount] sync failed for group=${groupId} chat=${telegramChatId}: ${e.message}`,
+      );
+      return null;
+    }
+  }
 
   private async loadGroup(botId: string, chatId: string) {
     const group = await this.prisma.group.findUnique({
