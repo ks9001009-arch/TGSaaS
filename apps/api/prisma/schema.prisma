@@ -261,6 +261,7 @@ model Group {
   ledger         LedgerBook?
   submissions    Submission[]
   collectionConfig CollectionConfig?
+  groupMembers   GroupMember[]
 
   joinedAt       DateTime @default(now())
   updatedAt      DateTime @updatedAt
@@ -1119,4 +1120,92 @@ model Submission {
   @@index([tenantId, platform, normalizedUsername])
   @@index([tenantId, createdAt])
   @@index([groupId])
+}
+
+// ============================================================
+//  Group Engagement — member profiles, point ledger, daily message stats
+// ============================================================
+
+enum PointTransactionType {
+  CHECKIN
+  MESSAGE
+  ADMIN
+  SYSTEM
+  INVITE
+  REWARD
+  PENALTY
+}
+
+// One engagement profile per Telegram user inside a group.
+model GroupMember {
+  id             String @id @default(cuid())
+  groupId        String
+  group          Group  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  telegramUserId String
+
+  username  String?
+  firstName String?
+  lastName  String?
+
+  points Int @default(0)
+  level  Int @default(1)
+
+  checkinStreak   Int       @default(0)
+  lastCheckinDate DateTime?
+
+  joinedAt     DateTime  @default(now())
+  lastActiveAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  pointTransactions PointTransaction[]
+  dailyMessageStats DailyMessageStat[]
+
+  @@unique([groupId, telegramUserId])
+  @@index([groupId, points])
+  @@index([groupId, lastActiveAt])
+}
+
+// Immutable point change ledger. amount may be positive or negative.
+model PointTransaction {
+  id             String              @id @default(cuid())
+  groupId        String
+  groupMemberId  String
+  groupMember    GroupMember         @relation(fields: [groupMemberId], references: [id], onDelete: Cascade)
+  telegramUserId String
+
+  amount      Int
+  type        PointTransactionType
+  reason      String?
+  // Optional business key for idempotent events (e.g. daily check-in).
+  // Not globally unique — callers may combine type/date/group later.
+  referenceId String?
+  createdAt   DateTime @default(now())
+
+  @@index([groupId, telegramUserId, createdAt])
+  @@index([groupMemberId, createdAt])
+  @@index([groupId, type, createdAt])
+  @@index([referenceId])
+}
+
+// Per-user daily message count for day/month leaderboards.
+// `date` stores a normalized business-day marker (typically UTC midnight of
+// that day). Group timezone conversion is the caller's responsibility; the
+// DB layer does not convert timezones.
+model DailyMessageStat {
+  id             String      @id @default(cuid())
+  groupId        String
+  groupMemberId  String
+  groupMember    GroupMember @relation(fields: [groupMemberId], references: [id], onDelete: Cascade)
+  telegramUserId String
+  date           DateTime // normalized business-day marker; caller must normalize before write
+  count          Int         @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([groupId, telegramUserId, date])
+  @@index([groupId, date, count])
+  @@index([groupMemberId, date])
 }

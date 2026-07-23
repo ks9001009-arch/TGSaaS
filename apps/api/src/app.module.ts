@@ -18,6 +18,7 @@ import { MarketingModule } from './marketing/marketing.module';
 import { ListenerModule } from './listener/listener.module';
 import { SystemModule } from './system/system.module';
 import { CollectionModule } from './collection/collection.module';
+import { EngagementModule } from './engagement/engagement.module';
 import { HealthController } from './health.controller';
 
 @Module({
@@ -41,6 +42,7 @@ import { HealthController } from './health.controller';
     ListenerModule,
     SystemModule,
     CollectionModule,
+    EngagementModule,
   ],
   controllers: [HealthController],
 })
