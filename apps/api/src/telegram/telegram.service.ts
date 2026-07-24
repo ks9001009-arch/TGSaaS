@@ -8,6 +8,13 @@ import { makeMathChallenge, makeCaptchaChallenge, makeButtonChallenge } from './
 import { matchKeyword, looksLikeAd, looksLikeLink } from './moderation.util';
 import { t, normalizeLocale, Locale } from '../i18n/locales';
 import { CollectionService } from '../collection/collection.service';
+import { CheckinService } from '../engagement/checkin.service';
+import { ProfileService } from '../engagement/profile.service';
+import {
+  ENGAGEMENT_CHECKIN_COMMAND_RE,
+  ENGAGEMENT_PROFILE_COMMAND_RE,
+  isEngagementCommandText,
+} from '../engagement/engagement-commands.util';
 
 @Injectable()
 export class TelegramService {
@@ -18,6 +25,8 @@ export class TelegramService {
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
     private readonly collection: CollectionService,
+    private readonly checkin: CheckinService,
+    private readonly profile: ProfileService,
   ) {}
 
   // ---------- per-user locale (private chat) ----------
@@ -224,6 +233,9 @@ export class TelegramService {
     bot.command('help', (ctx) => this.onHelp(ctx, botId));
     bot.command('id', (ctx) => this.onId(ctx, botId));
     bot.command('getid', (ctx) => this.onGetId(ctx, botId));
+    // Chinese engagement commands (not valid Bot API command names for setMyCommands).
+    bot.hears(ENGAGEMENT_CHECKIN_COMMAND_RE, (ctx) => this.onCheckin(ctx, botId));
+    bot.hears(ENGAGEMENT_PROFILE_COMMAND_RE, (ctx) => this.onMyProfile(ctx, botId));
 
     bot.on('my_chat_member', (ctx) => this.onMyChatMember(ctx, botId));
     bot.on('message:new_chat_members', (ctx) => this.onNewMembers(ctx, botId));
@@ -292,6 +304,85 @@ export class TelegramService {
       .resized()
       .oneTime();
     await ctx.reply(t(locale, 'getid_prompt'), { reply_markup: kb });
+  }
+
+  // ---------- group engagement: /签到 /我的 ----------
+
+  private isGroupChat(ctx: Context): boolean {
+    const type = ctx.chat?.type;
+    return type === 'group' || type === 'supergroup';
+  }
+
+  private async onCheckin(ctx: Context, botId: string) {
+    // group / supergroup only; private & channel ignored (same as other group tools).
+    if (!this.isGroupChat(ctx) || !ctx.from?.id) return;
+    const group = await this.loadGroup(botId, String(ctx.chat!.id));
+    if (!group) {
+      await ctx.reply('本群未启用或机器人未处于运行状态。');
+      return;
+    }
+
+    try {
+      const result = await this.checkin.checkin({
+        groupId: group.id,
+        telegramUserId: String(ctx.from.id),
+        username: ctx.from.username ?? null,
+        firstName: ctx.from.first_name ?? null,
+        lastName: ctx.from.last_name ?? null,
+      });
+
+      if (result.status === 'already_checked_in') {
+        await ctx.reply(
+          `今日已签到过啦。\n连续签到：${result.streak} 天\n当前积分：${result.member.points}`,
+        );
+        return;
+      }
+
+      const bonusLine =
+        result.bonusPoints > 0
+          ? `\n连续 ${result.streak} 天奖励：+${result.bonusPoints}`
+          : '';
+      await ctx.reply(
+        `签到成功！\n基础积分：+${result.basePoints}${bonusLine}\n本次获得：+${result.pointsAwarded}\n连续签到：${result.streak} 天\n当前积分：${result.member.points}`,
+      );
+    } catch (e: any) {
+      this.logger.warn(`checkin failed: ${e.message}`);
+      await ctx.reply('签到失败，请稍后再试。');
+    }
+  }
+
+  private async onMyProfile(ctx: Context, botId: string) {
+    if (!this.isGroupChat(ctx) || !ctx.from?.id) return;
+    const group = await this.loadGroup(botId, String(ctx.chat!.id));
+    if (!group) {
+      await ctx.reply('本群未启用或机器人未处于运行状态。');
+      return;
+    }
+
+    try {
+      const summary = await this.profile.getOrCreateProfileSummary({
+        groupId: group.id,
+        telegramUserId: String(ctx.from.id),
+        username: ctx.from.username ?? null,
+        firstName: ctx.from.first_name ?? null,
+        lastName: ctx.from.last_name ?? null,
+      });
+
+      await ctx.reply(
+        [
+          '我的互动档案',
+          `用户：${summary.displayName}`,
+          `等级：${summary.level}`,
+          `积分：${summary.points}`,
+          `连续签到：${summary.checkinStreak} 天`,
+          `今日消息：${summary.todayMessages}`,
+          `本月消息：${summary.monthMessages}`,
+        ].join('\n'),
+      );
+    } catch (e: any) {
+      this.logger.warn(`profile failed: ${e.message}`);
+      await ctx.reply('查询失败，请稍后再试。');
+    }
   }
 
   private async onUsersShared(ctx: Context, botId: string) {
@@ -1331,6 +1422,8 @@ export class TelegramService {
 
     const text = ctx.message?.text || '';
     if (!text) return;
+    // Engagement commands are handled by dedicated hears filters.
+    if (isEngagementCommandText(text)) return;
 
     const group = await this.loadGroup(botId, String(ctx.chat.id));
     if (!group) return;

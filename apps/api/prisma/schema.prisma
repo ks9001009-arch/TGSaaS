@@ -1179,10 +1179,12 @@ model PointTransaction {
   type        PointTransactionType
   reason      String?
   // Optional business key for idempotent events (e.g. daily check-in).
-  // Not globally unique — callers may combine type/date/group later.
+  // Partial uniqueness: (groupId, referenceId) when referenceId is set.
+  // Multiple NULL referenceId rows are allowed (PostgreSQL UNIQUE semantics).
   referenceId String?
   createdAt   DateTime @default(now())
 
+  @@unique([groupId, referenceId])
   @@index([groupId, telegramUserId, createdAt])
   @@index([groupMemberId, createdAt])
   @@index([groupId, type, createdAt])
