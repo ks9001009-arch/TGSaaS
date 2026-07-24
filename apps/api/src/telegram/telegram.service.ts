@@ -8,6 +8,7 @@ import { makeMathChallenge, makeCaptchaChallenge, makeButtonChallenge } from './
 import { matchKeyword, looksLikeAd, looksLikeLink } from './moderation.util';
 import { t, normalizeLocale, Locale } from '../i18n/locales';
 import { CollectionService } from '../collection/collection.service';
+import { EngagementService } from '../engagement/engagement.service';
 import { CheckinService } from '../engagement/checkin.service';
 import { ProfileService } from '../engagement/profile.service';
 import { LeaderboardService } from '../engagement/leaderboard.service';
@@ -18,6 +19,8 @@ import {
   ENGAGEMENT_MESSAGE_LEADERBOARD_COMMAND_RE,
   isEngagementCommandText,
 } from '../engagement/engagement-commands.util';
+import { recordGroupMessageActivity } from './message-activity';
+import { isCountableGroupUserMessage } from './message-activity.util';
 
 @Injectable()
 export class TelegramService {
@@ -28,6 +31,7 @@ export class TelegramService {
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
     private readonly collection: CollectionService,
+    private readonly engagement: EngagementService,
     private readonly checkin: CheckinService,
     private readonly profile: ProfileService,
     private readonly leaderboard: LeaderboardService,
@@ -258,6 +262,20 @@ export class TelegramService {
     bot.on('callback_query:data', (ctx) => this.onCallback(ctx, botId));
     bot.on('message:text', (ctx) => this.onMessage(ctx, botId));
     bot.on('message:photo', (ctx) => this.onPhoto(ctx, botId));
+    // Non-text user content (photos handled above). Counted after basic checks;
+    // these types are not run through text moderation today.
+    bot.on(
+      [
+        'message:video',
+        'message:animation',
+        'message:document',
+        'message:voice',
+        'message:video_note',
+        'message:audio',
+        'message:sticker',
+      ],
+      (ctx) => this.onMediaMessage(ctx, botId),
+    );
 
     bot.catch((err) => this.logger.error(`grammY error: ${err.message}`));
   }
@@ -1472,14 +1490,20 @@ export class TelegramService {
 
   // ---------- message moderation ----------
 
-  // Photo messages: only the collection feature cares about these (screenshots
-  // in groups, screenshot queries in private).
+  // Photo messages: collection (screenshots) + group message activity stats.
   private async onPhoto(ctx: Context, botId: string) {
     if (ctx.chat?.type === 'private') {
       await this.collection.onPrivateMessage(botId, ctx).catch(() => undefined);
       return;
     }
     await this.collection.onGroupMessage(botId, ctx).catch(() => undefined);
+    // Photos are not text-moderated today; count after collection (best-effort).
+    await this.tryRecordGroupMessageActivity(ctx, botId);
+  }
+
+  /** Video / document / voice / sticker / etc. — activity stats only. */
+  private async onMediaMessage(ctx: Context, botId: string) {
+    await this.tryRecordGroupMessageActivity(ctx, botId);
   }
 
   private async onMessage(ctx: Context, botId: string) {
@@ -1509,11 +1533,14 @@ export class TelegramService {
       `[msg] group=${group.id} user=${userId} antiFlood=${group.filter?.antiFlood ?? false}`,
     );
 
-    // whitelist bypasses moderation
+    // whitelist bypasses moderation — message stays, so it counts.
     const white = group.listEntries?.find(
       (l: any) => l.type === 'WHITE' && l.telegramUserId === userId,
     );
-    if (white) return;
+    if (white) {
+      await this.recordGroupMessageActivitySafe(ctx, botId, group);
+      return;
+    }
 
     // blacklist => remove immediately
     const black = group.listEntries?.find(
@@ -1569,6 +1596,61 @@ export class TelegramService {
         await ctx.reply(ar.response);
         break;
       }
+    }
+
+    // Count only messages that passed moderation (not deleted / blocked / flooded).
+    await this.recordGroupMessageActivitySafe(ctx, botId, group);
+  }
+
+  /**
+   * Load group then record activity. Used for non-text content paths that do
+   * not already hold a loaded group row.
+   */
+  private async tryRecordGroupMessageActivity(ctx: Context, botId: string) {
+    if (!isCountableGroupUserMessage(ctx) || !ctx.chat) return;
+    let group: Awaited<ReturnType<TelegramService['loadGroup']>>;
+    try {
+      group = await this.loadGroup(botId, String(ctx.chat.id));
+    } catch (e: any) {
+      this.logger.error(
+        `[msg-stat] loadGroup failed bot=${botId} chat=${ctx.chat.id} user=${ctx.from?.id}: ${e?.message ?? e}`,
+      );
+      return;
+    }
+    if (!group) return;
+    await this.recordGroupMessageActivitySafe(ctx, botId, group);
+  }
+
+  /**
+   * Best-effort DailyMessageStat + GroupMember sync. Failures are logged and
+   * never rethrown — moderation / replies must keep working.
+   */
+  private async recordGroupMessageActivitySafe(
+    ctx: Context,
+    botId: string,
+    group: { id: string },
+  ) {
+    if (!isCountableGroupUserMessage(ctx)) return;
+    const from = ctx.from!;
+    const messageDateUnix = ctx.message?.date;
+    if (messageDateUnix == null) return;
+
+    const telegramChatId = ctx.chat ? String(ctx.chat.id) : '';
+    const telegramUserId = String(from.id);
+
+    try {
+      await recordGroupMessageActivity(this.engagement, {
+        groupId: group.id,
+        telegramUserId,
+        username: from.username ?? null,
+        firstName: from.first_name ?? null,
+        lastName: from.last_name ?? null,
+        messageDateUnix,
+      });
+    } catch (e: any) {
+      this.logger.error(
+        `[msg-stat] failed bot=${botId} chat=${telegramChatId} user=${telegramUserId}: ${e?.message ?? e}`,
+      );
     }
   }
 
