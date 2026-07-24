@@ -10,9 +10,12 @@ import { t, normalizeLocale, Locale } from '../i18n/locales';
 import { CollectionService } from '../collection/collection.service';
 import { CheckinService } from '../engagement/checkin.service';
 import { ProfileService } from '../engagement/profile.service';
+import { LeaderboardService } from '../engagement/leaderboard.service';
 import {
   ENGAGEMENT_CHECKIN_COMMAND_RE,
   ENGAGEMENT_PROFILE_COMMAND_RE,
+  ENGAGEMENT_POINTS_LEADERBOARD_COMMAND_RE,
+  ENGAGEMENT_MESSAGE_LEADERBOARD_COMMAND_RE,
   isEngagementCommandText,
 } from '../engagement/engagement-commands.util';
 
@@ -27,6 +30,7 @@ export class TelegramService {
     private readonly collection: CollectionService,
     private readonly checkin: CheckinService,
     private readonly profile: ProfileService,
+    private readonly leaderboard: LeaderboardService,
   ) {}
 
   // ---------- per-user locale (private chat) ----------
@@ -236,6 +240,12 @@ export class TelegramService {
     // Chinese engagement commands (not valid Bot API command names for setMyCommands).
     bot.hears(ENGAGEMENT_CHECKIN_COMMAND_RE, (ctx) => this.onCheckin(ctx, botId));
     bot.hears(ENGAGEMENT_PROFILE_COMMAND_RE, (ctx) => this.onMyProfile(ctx, botId));
+    bot.hears(ENGAGEMENT_POINTS_LEADERBOARD_COMMAND_RE, (ctx) =>
+      this.onPointsLeaderboard(ctx, botId),
+    );
+    bot.hears(ENGAGEMENT_MESSAGE_LEADERBOARD_COMMAND_RE, (ctx) =>
+      this.onMessageLeaderboard(ctx, botId),
+    );
 
     bot.on('my_chat_member', (ctx) => this.onMyChatMember(ctx, botId));
     bot.on('message:new_chat_members', (ctx) => this.onNewMembers(ctx, botId));
@@ -306,11 +316,32 @@ export class TelegramService {
     await ctx.reply(t(locale, 'getid_prompt'), { reply_markup: kb });
   }
 
-  // ---------- group engagement: /签到 /我的 ----------
+  // ---------- group engagement: /签到 /我的 /积分榜 /消息榜 ----------
 
   private isGroupChat(ctx: Context): boolean {
     const type = ctx.chat?.type;
     return type === 'group' || type === 'supergroup';
+  }
+
+  private formatLeaderboardMessage(
+    title: string,
+    unit: string,
+    result: { entries: Array<{ rank: number; displayName: string; value: number }>; currentUser: { rank: number; value: number } | null },
+  ): string {
+    const lines = [title];
+    if (!result.entries.length) {
+      lines.push('暂无上榜数据。');
+    } else {
+      for (const e of result.entries) {
+        lines.push(`${e.rank}. ${e.displayName} — ${e.value}${unit}`);
+      }
+    }
+    if (result.currentUser) {
+      lines.push(`你的排名：第 ${result.currentUser.rank} 名（${result.currentUser.value}${unit}）`);
+    } else {
+      lines.push('你的排名：未上榜');
+    }
+    return lines.join('\n');
   }
 
   private async onCheckin(ctx: Context, botId: string) {
@@ -382,6 +413,49 @@ export class TelegramService {
     } catch (e: any) {
       this.logger.warn(`profile failed: ${e.message}`);
       await ctx.reply('查询失败，请稍后再试。');
+    }
+  }
+
+  private async onPointsLeaderboard(ctx: Context, botId: string) {
+    if (!this.isGroupChat(ctx) || !ctx.from?.id) return;
+    const group = await this.loadGroup(botId, String(ctx.chat!.id));
+    if (!group) {
+      await ctx.reply('本群未启用或机器人未处于运行状态。');
+      return;
+    }
+
+    try {
+      const result = await this.leaderboard.getPointsLeaderboard(
+        group.id,
+        String(ctx.from.id),
+        10,
+      );
+      await ctx.reply(this.formatLeaderboardMessage('积分榜 TOP10', ' 分', result));
+    } catch (e: any) {
+      this.logger.warn(`points leaderboard failed: ${e.message}`);
+      await ctx.reply('排行榜查询失败，请稍后再试。');
+    }
+  }
+
+  private async onMessageLeaderboard(ctx: Context, botId: string) {
+    if (!this.isGroupChat(ctx) || !ctx.from?.id) return;
+    const group = await this.loadGroup(botId, String(ctx.chat!.id));
+    if (!group) {
+      await ctx.reply('本群未启用或机器人未处于运行状态。');
+      return;
+    }
+
+    try {
+      const result = await this.leaderboard.getMonthlyMessageLeaderboard(
+        group.id,
+        String(ctx.from.id),
+        new Date(),
+        10,
+      );
+      await ctx.reply(this.formatLeaderboardMessage('本月消息榜 TOP10', ' 条', result));
+    } catch (e: any) {
+      this.logger.warn(`message leaderboard failed: ${e.message}`);
+      await ctx.reply('排行榜查询失败，请稍后再试。');
     }
   }
 
