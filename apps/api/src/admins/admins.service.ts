@@ -12,6 +12,7 @@ import {
   PermissionKey,
 } from '../rbac/permissions';
 import { CreateAdminDto, UpdatePermissionsDto, ToggleActiveDto, UpdateAdminDto, AssignBotDto } from './dto';
+import { SecurityAlertService } from '../security/security-alert.service';
 
 @Injectable()
 export class AdminsService {
@@ -20,6 +21,7 @@ export class AdminsService {
     private readonly rbac: RbacService,
     private readonly rbacBootstrap: RbacBootstrapService,
     private readonly realtime: RealtimeService,
+    private readonly alerts: SecurityAlertService,
   ) {}
 
   meta() {
@@ -167,14 +169,27 @@ export class AdminsService {
     const target = await this.assertTargetInScope(ctx.tenantId, id);
     const updated = await this.prisma.admin.update({ where: { id: target.id }, data: { active: dto.active } });
     this.realtime.permissionsChanged(target.id);
+    this.alerts.notify({
+      tenantId: ctx.tenantId,
+      reason: 'ADMIN_TOGGLE',
+      title: dto.active ? '管理员已启用' : '管理员已停用',
+      detail: `操作者 ${userId} 将 ${target.email} 设为 active=${dto.active}`,
+    });
     return { id: updated.id, active: updated.active };
   }
 
   async remove(userId: string, id: string) {
     const ctx = await this.assertCanManage(userId);
     const target = await this.assertTargetInScope(ctx.tenantId, id);
+    const email = target.email;
     await this.prisma.admin.delete({ where: { id: target.id } });
     this.realtime.permissionsChanged(target.id);
+    this.alerts.notify({
+      tenantId: ctx.tenantId,
+      reason: 'ADMIN_DELETE',
+      title: '管理员已删除',
+      detail: `操作者 ${userId} 删除了管理员 ${email}`,
+    });
     return { ok: true };
   }
 

@@ -21,7 +21,8 @@ export class AuthController {
   login(@Body() dto: LoginDto, @Req() req: any) {
     const forwarded = (req.headers?.['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim();
     const ip = forwarded || req.ip || req.socket?.remoteAddress;
-    return this.auth.login(dto, ip);
+    const ua = req.headers?.['user-agent'] as string | undefined;
+    return this.auth.login(dto, ip, ua);
   }
 
   @UseGuards(JwtAuthGuard)

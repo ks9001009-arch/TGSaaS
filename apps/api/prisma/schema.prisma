@@ -131,9 +131,40 @@ model Admin {
   adminGroups      AdminGroup[]
   adminListeners   AdminListener[]
   ownedAds         Ad[]         @relation("AdOwner")
+  ipAllowlist      AdminIpAllowlist[]
+  loginAudits      LoginAudit[]
 
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
+}
+
+// Super-admin login IP allowlist (strict). Empty list => first success auto-pins IP.
+model AdminIpAllowlist {
+  id        String   @id @default(cuid())
+  adminId   String
+  admin     Admin    @relation(fields: [adminId], references: [id], onDelete: Cascade)
+  ip        String   // exact IPv4/IPv6 or CIDR string
+  label     String?
+  createdAt DateTime @default(now())
+
+  @@unique([adminId, ip])
+  @@index([adminId])
+}
+
+// Dashboard login audit trail (success + failure).
+model LoginAudit {
+  id         String   @id @default(cuid())
+  adminEmail String
+  adminId    String?
+  admin      Admin?   @relation(fields: [adminId], references: [id], onDelete: SetNull)
+  ip         String
+  userAgent  String?
+  success    Boolean
+  reason     String   // OK | AUTO_PIN | BAD_PASSWORD | INACTIVE | IP_BLOCKED | RATE_LIMITED
+  createdAt  DateTime @default(now())
+
+  @@index([adminEmail, createdAt])
+  @@index([createdAt])
 }
 
 // Binding: which bots an admin (sub-admin) may manage.

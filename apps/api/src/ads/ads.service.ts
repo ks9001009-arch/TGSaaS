@@ -4,6 +4,7 @@ import { RbacService } from '../rbac/rbac.service';
 import { TelegramService } from '../telegram/telegram.service';
 import { PERMISSIONS } from '../rbac/permissions';
 import { CreateAdDto, UpdateAdDto, AssignAdDto, SetAdButtonsDto } from './dto';
+import { SecurityAlertService } from '../security/security-alert.service';
 
 const PLACEMENTS = ['WELCOME', 'PRIVATE_MENU', 'POST_VERIFY', 'SCHEDULED', 'TEMPLATE'];
 
@@ -13,6 +14,7 @@ export class AdsService {
     private readonly prisma: PrismaService,
     private readonly rbac: RbacService,
     private readonly telegram: TelegramService,
+    private readonly alerts: SecurityAlertService,
   ) {}
 
   // Sub-admins only ever see/manage ads explicitly assigned to them (ownerAdminId).
@@ -143,6 +145,12 @@ export class AdsService {
           : undefined,
       },
       include: { buttons: true },
+    });
+    this.alerts.notify({
+      tenantId: ctx.tenantId,
+      reason: 'AD_CREATE',
+      title: '广告已创建',
+      detail: `操作者 ${ctx.adminId} 创建广告「${ad.title}」id=${ad.id}`,
     });
     return ad;
   }
@@ -301,6 +309,12 @@ export class AdsService {
     if (group.status === 'LEFT') throw new BadRequestException('机器人已不在该群组');
 
     await this.telegram.sendAdToChat(group.bot, group.telegramChatId, ad.id, group.id);
+    this.alerts.notify({
+      tenantId: ctx.tenantId,
+      reason: 'AD_SEND',
+      title: '广告已立即发送',
+      detail: `操作者 ${ctx.adminId} 向群 ${group.title || groupId} 发送广告「${ad.title}」`,
+    });
     return { ok: true };
   }
 }

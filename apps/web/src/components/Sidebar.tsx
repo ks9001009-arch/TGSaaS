@@ -28,6 +28,7 @@ import {
   ListChecks,
   ServerCog,
   KeySquare,
+  Shield,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { useAccess, PERM } from '@/lib/access';
@@ -123,6 +124,7 @@ export default function Sidebar() {
         title: '系统中心',
         icon: ServerCog,
         items: [
+          { href: '/dashboard/security', label: '安全中心', icon: Shield, show: isSuper },
           { href: '/dashboard/system/telegram-api', label: 'Telegram API', icon: KeySquare, show: isSuper },
           { href: '/dashboard/settings', label: '系统设置', icon: Settings, show: isSuper || can(PERM.SETTINGS_MANAGE) },
           { href: '/dashboard/account', label: '我的账户', icon: UserCircle, show: true },

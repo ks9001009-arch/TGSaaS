@@ -14,8 +14,8 @@ RUN npm install
 COPY . .
 RUN npx prisma generate
 RUN npm run build
-# compile the seed script separately (kept outside src/)
-RUN npx tsc prisma/seed.ts --outDir dist/prisma --rootDir prisma \
+# compile prisma utility scripts (seed + one-shot migrations)
+RUN npx tsc prisma/seed.ts prisma/migrate-superadmin-to-lingjie.ts --outDir dist/prisma --rootDir prisma \
     --module commonjs --target ES2021 --esModuleInterop --skipLibCheck || true
 
 # ---------- runtime stage ----------
