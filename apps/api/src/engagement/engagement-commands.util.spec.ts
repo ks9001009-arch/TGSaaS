@@ -1,8 +1,11 @@
 import {
   ENGAGEMENT_CHECKIN_COMMAND_RE,
   ENGAGEMENT_PROFILE_COMMAND_RE,
+  ENGAGEMENT_POINTS_BALANCE_COMMAND_RE,
   ENGAGEMENT_POINTS_LEADERBOARD_COMMAND_RE,
+  ENGAGEMENT_DAILY_RANK_COMMAND_RE,
   ENGAGEMENT_MESSAGE_LEADERBOARD_COMMAND_RE,
+  ENGAGEMENT_LOTTERY_COMMAND_RE,
   isEngagementCommandText,
 } from './engagement-commands.util';
 
@@ -36,6 +39,14 @@ describe('engagement command matchers', () => {
     expect(ENGAGEMENT_PROFILE_COMMAND_RE.test('我的资料')).toBe(false);
   });
 
+  it('matches 积分 balance exactly and not 积分榜', () => {
+    expect(ENGAGEMENT_POINTS_BALANCE_COMMAND_RE.test('积分')).toBe(true);
+    expect(ENGAGEMENT_POINTS_BALANCE_COMMAND_RE.test('/积分')).toBe(true);
+    expect(ENGAGEMENT_POINTS_BALANCE_COMMAND_RE.test('/积分@bot')).toBe(true);
+    expect(ENGAGEMENT_POINTS_BALANCE_COMMAND_RE.test('积分榜')).toBe(false);
+    expect(ENGAGEMENT_POINTS_BALANCE_COMMAND_RE.test('/积分榜')).toBe(false);
+  });
+
   it('matches 积分榜 with or without slash', () => {
     expect(ENGAGEMENT_POINTS_LEADERBOARD_COMMAND_RE.test('/积分榜')).toBe(true);
     expect(ENGAGEMENT_POINTS_LEADERBOARD_COMMAND_RE.test('积分榜')).toBe(true);
@@ -48,6 +59,15 @@ describe('engagement command matchers', () => {
     expect(ENGAGEMENT_POINTS_LEADERBOARD_COMMAND_RE.test('今天看/积分榜')).toBe(false);
     expect(ENGAGEMENT_POINTS_LEADERBOARD_COMMAND_RE.test('/积分榜 extra')).toBe(false);
     expect(ENGAGEMENT_POINTS_LEADERBOARD_COMMAND_RE.test('积分榜 extra')).toBe(false);
+  });
+
+  it('matches 排行榜 and 抽奖', () => {
+    expect(ENGAGEMENT_DAILY_RANK_COMMAND_RE.test('排行榜')).toBe(true);
+    expect(ENGAGEMENT_DAILY_RANK_COMMAND_RE.test('/排行榜@x')).toBe(true);
+    expect(ENGAGEMENT_LOTTERY_COMMAND_RE.test('抽奖')).toBe(true);
+    expect(ENGAGEMENT_LOTTERY_COMMAND_RE.test('/抽奖')).toBe(true);
+    expect(ENGAGEMENT_DAILY_RANK_COMMAND_RE.test('排行榜一下')).toBe(false);
+    expect(ENGAGEMENT_LOTTERY_COMMAND_RE.test('去抽奖')).toBe(false);
   });
 
   it('matches 消息榜 with or without slash and rejects bad variants', () => {
@@ -66,11 +86,23 @@ describe('engagement command matchers', () => {
     expect(isEngagementCommandText(' 签到 ')).toBe(true);
     expect(isEngagementCommandText('/我的')).toBe(true);
     expect(isEngagementCommandText('我的')).toBe(true);
+    expect(isEngagementCommandText('积分')).toBe(true);
+    expect(isEngagementCommandText('排行榜')).toBe(true);
+    expect(isEngagementCommandText('抽奖')).toBe(true);
     expect(isEngagementCommandText(' /积分榜 ')).toBe(true);
     expect(isEngagementCommandText('积分榜')).toBe(true);
     expect(isEngagementCommandText('/消息榜@x')).toBe(true);
     expect(isEngagementCommandText('消息榜')).toBe(true);
+    expect(isEngagementCommandText('/checkin')).toBe(true);
+    expect(isEngagementCommandText('/me@bot')).toBe(true);
+    expect(isEngagementCommandText('/balance')).toBe(true);
+    expect(isEngagementCommandText('/rank')).toBe(true);
+    expect(isEngagementCommandText('/lottery')).toBe(true);
+    expect(isEngagementCommandText('/points')).toBe(true);
+    expect(isEngagementCommandText('/messages')).toBe(true);
     expect(isEngagementCommandText('/签到abc')).toBe(false);
     expect(isEngagementCommandText('签到一下')).toBe(false);
+    expect(isEngagementCommandText('me')).toBe(false);
+    expect(isEngagementCommandText('checkin')).toBe(false);
   });
 });

@@ -12,11 +12,15 @@ import { EngagementService } from '../engagement/engagement.service';
 import { CheckinService } from '../engagement/checkin.service';
 import { ProfileService } from '../engagement/profile.service';
 import { LeaderboardService } from '../engagement/leaderboard.service';
+import { LotteryService } from '../engagement/lottery.service';
 import {
   ENGAGEMENT_CHECKIN_COMMAND_RE,
   ENGAGEMENT_PROFILE_COMMAND_RE,
+  ENGAGEMENT_POINTS_BALANCE_COMMAND_RE,
   ENGAGEMENT_POINTS_LEADERBOARD_COMMAND_RE,
+  ENGAGEMENT_DAILY_RANK_COMMAND_RE,
   ENGAGEMENT_MESSAGE_LEADERBOARD_COMMAND_RE,
+  ENGAGEMENT_LOTTERY_COMMAND_RE,
   isEngagementCommandText,
 } from '../engagement/engagement-commands.util';
 import { recordGroupMessageActivity } from './message-activity';
@@ -35,6 +39,7 @@ export class TelegramService {
     private readonly checkin: CheckinService,
     private readonly profile: ProfileService,
     private readonly leaderboard: LeaderboardService,
+    private readonly lottery: LotteryService,
   ) {}
 
   // ---------- per-user locale (private chat) ----------
@@ -57,24 +62,53 @@ export class TelegramService {
     }
   }
 
-  // Register the chat-input command menu (bottom menu) for a bot.
+  // Register chat-input command menus. Telegram only allows Latin command names;
+  // group menu shows engagement shortcuts with Chinese descriptions.
   async setupCommands(record: BotRecord): Promise<void> {
     const bot = await this.getInstance(record);
-    const zh = [
+    const privateZh = [
       { command: 'start', description: '开始' },
       { command: 'help', description: '帮助' },
       { command: 'id', description: '查看ID' },
       { command: 'getid', description: '查询用户ID' },
     ];
-    const en = [
+    const privateEn = [
       { command: 'start', description: 'Start' },
       { command: 'help', description: 'Help' },
       { command: 'id', description: 'Show ID' },
       { command: 'getid', description: 'Look up user ID' },
     ];
+    const groupZh = [
+      { command: 'checkin', description: '每日签到' },
+      { command: 'me', description: '我的资料' },
+      { command: 'balance', description: '积分余额' },
+      { command: 'rank', description: '今日活跃排行' },
+      { command: 'lottery', description: '积分抽奖' },
+      { command: 'help', description: '互动帮助' },
+    ];
+    const groupEn = [
+      { command: 'checkin', description: 'Daily check-in' },
+      { command: 'me', description: 'My profile' },
+      { command: 'balance', description: 'Points balance' },
+      { command: 'rank', description: 'Today activity rank' },
+      { command: 'lottery', description: 'Points lottery' },
+      { command: 'help', description: 'Engagement help' },
+    ];
     try {
-      await bot.api.setMyCommands(zh);
-      await bot.api.setMyCommands(en, { language_code: 'en' });
+      // Default + private: admin / home commands
+      await bot.api.setMyCommands(privateZh);
+      await bot.api.setMyCommands(privateEn, { language_code: 'en' });
+      await bot.api.setMyCommands(privateZh, { scope: { type: 'all_private_chats' } });
+      await bot.api.setMyCommands(privateEn, {
+        scope: { type: 'all_private_chats' },
+        language_code: 'en',
+      });
+      // Groups: engagement menu for ordinary members
+      await bot.api.setMyCommands(groupZh, { scope: { type: 'all_group_chats' } });
+      await bot.api.setMyCommands(groupEn, {
+        scope: { type: 'all_group_chats' },
+        language_code: 'en',
+      });
     } catch (e: any) {
       this.logger.warn(`setMyCommands failed: ${e.message}`);
     }
@@ -241,9 +275,20 @@ export class TelegramService {
     bot.command('help', (ctx) => this.onHelp(ctx, botId));
     bot.command('id', (ctx) => this.onId(ctx, botId));
     bot.command('getid', (ctx) => this.onGetId(ctx, botId));
-    // Chinese engagement commands (not valid Bot API command names for setMyCommands).
+    // Group menu Latin commands (setMyCommands cannot use Chinese command names).
+    bot.command('checkin', (ctx) => this.onCheckin(ctx, botId));
+    bot.command('me', (ctx) => this.onMyProfile(ctx, botId));
+    bot.command('balance', (ctx) => this.onPointsBalance(ctx, botId));
+    bot.command('rank', (ctx) => this.onDailyRank(ctx, botId));
+    bot.command('lottery', (ctx) => this.onLottery(ctx, botId));
+    bot.command('points', (ctx) => this.onPointsLeaderboard(ctx, botId));
+    bot.command('messages', (ctx) => this.onMessageLeaderboard(ctx, botId));
+    // Chinese keywords: /签到 or 签到 (and balance / rank / lottery / boards).
     bot.hears(ENGAGEMENT_CHECKIN_COMMAND_RE, (ctx) => this.onCheckin(ctx, botId));
     bot.hears(ENGAGEMENT_PROFILE_COMMAND_RE, (ctx) => this.onMyProfile(ctx, botId));
+    bot.hears(ENGAGEMENT_POINTS_BALANCE_COMMAND_RE, (ctx) => this.onPointsBalance(ctx, botId));
+    bot.hears(ENGAGEMENT_DAILY_RANK_COMMAND_RE, (ctx) => this.onDailyRank(ctx, botId));
+    bot.hears(ENGAGEMENT_LOTTERY_COMMAND_RE, (ctx) => this.onLottery(ctx, botId));
     bot.hears(ENGAGEMENT_POINTS_LEADERBOARD_COMMAND_RE, (ctx) =>
       this.onPointsLeaderboard(ctx, botId),
     );
@@ -310,6 +355,10 @@ export class TelegramService {
 
   private async onHelp(ctx: Context, botId: string) {
     const locale = await this.getUserLocale(botId, ctx.from?.id);
+    if (this.isGroupChat(ctx)) {
+      await ctx.reply(t(locale, 'help_group'));
+      return;
+    }
     await ctx.reply(t(locale, 'help'));
   }
 
@@ -431,6 +480,101 @@ export class TelegramService {
     } catch (e: any) {
       this.logger.warn(`profile failed: ${e.message}`);
       await ctx.reply('查询失败，请稍后再试。');
+    }
+  }
+
+  private async onPointsBalance(ctx: Context, botId: string) {
+    if (!this.isGroupChat(ctx) || !ctx.from?.id) return;
+    const group = await this.loadGroup(botId, String(ctx.chat!.id));
+    if (!group) {
+      await ctx.reply('本群未启用或机器人未处于运行状态。');
+      return;
+    }
+
+    try {
+      const summary = await this.profile.getOrCreateProfileSummary({
+        groupId: group.id,
+        telegramUserId: String(ctx.from.id),
+        username: ctx.from.username ?? null,
+        firstName: ctx.from.first_name ?? null,
+        lastName: ctx.from.last_name ?? null,
+      });
+      await ctx.reply(`你的积分余额：${summary.points}`);
+    } catch (e: any) {
+      this.logger.warn(`points balance failed: ${e.message}`);
+      await ctx.reply('查询失败，请稍后再试。');
+    }
+  }
+
+  private async onDailyRank(ctx: Context, botId: string) {
+    if (!this.isGroupChat(ctx) || !ctx.from?.id) return;
+    const group = await this.loadGroup(botId, String(ctx.chat!.id));
+    if (!group) {
+      await ctx.reply('本群未启用或机器人未处于运行状态。');
+      return;
+    }
+
+    try {
+      const result = await this.leaderboard.getDailyMessageLeaderboard(
+        group.id,
+        String(ctx.from.id),
+        new Date(),
+        10,
+      );
+      await ctx.reply(this.formatLeaderboardMessage('今日活跃排行 TOP10', ' 条', result));
+    } catch (e: any) {
+      this.logger.warn(`daily rank failed: ${e.message}`);
+      await ctx.reply('排行榜查询失败，请稍后再试。');
+    }
+  }
+
+  private async onLottery(ctx: Context, botId: string) {
+    if (!this.isGroupChat(ctx) || !ctx.from?.id) return;
+    const group = await this.loadGroup(botId, String(ctx.chat!.id));
+    if (!group) {
+      await ctx.reply('本群未启用或机器人未处于运行状态。');
+      return;
+    }
+
+    try {
+      const result = await this.lottery.draw({
+        groupId: group.id,
+        telegramUserId: String(ctx.from.id),
+        username: ctx.from.username ?? null,
+        firstName: ctx.from.first_name ?? null,
+        lastName: ctx.from.last_name ?? null,
+      });
+
+      if (result.status === 'disabled') {
+        await ctx.reply('本群抽奖尚未开启，请联系管理员在后台配置。');
+        return;
+      }
+      if (result.status === 'no_prizes') {
+        await ctx.reply('奖池暂无可用奖品，请联系管理员配置。');
+        return;
+      }
+      if (result.status === 'insufficient_points') {
+        await ctx.reply(
+          `积分不足。\n每次抽奖消耗：${result.costPoints}\n当前积分：${result.points}`,
+        );
+        return;
+      }
+
+      if (result.won) {
+        const rewardLine =
+          result.rewardPoints > 0 ? `\n奖励积分：+${result.rewardPoints}` : '';
+        await ctx.reply(
+          `恭喜中奖！\n奖品：${result.prizeName}${rewardLine}\n消耗积分：-${result.costPoints}\n当前积分：${result.pointsAfter}`,
+        );
+        return;
+      }
+
+      await ctx.reply(
+        `很遗憾，未中奖。\n消耗积分：-${result.costPoints}\n当前积分：${result.pointsAfter}`,
+      );
+    } catch (e: any) {
+      this.logger.warn(`lottery failed: ${e.message}`);
+      await ctx.reply('抽奖失败，请稍后再试。');
     }
   }
 

@@ -262,6 +262,7 @@ model Group {
   submissions    Submission[]
   collectionConfig CollectionConfig?
   groupMembers   GroupMember[]
+  lotteryConfig  GroupLotteryConfig?
 
   joinedAt       DateTime @default(now())
   updatedAt      DateTime @updatedAt
@@ -1134,6 +1135,7 @@ enum PointTransactionType {
   INVITE
   REWARD
   PENALTY
+  LOTTERY
 }
 
 // One engagement profile per Telegram user inside a group.
@@ -1161,6 +1163,7 @@ model GroupMember {
 
   pointTransactions PointTransaction[]
   dailyMessageStats DailyMessageStat[]
+  lotteryDraws      LotteryDraw[]
 
   @@unique([groupId, telegramUserId])
   @@index([groupId, points])
@@ -1210,4 +1213,69 @@ model DailyMessageStat {
   @@unique([groupId, telegramUserId, date])
   @@index([groupId, date, count])
   @@index([groupMemberId, date])
+}
+
+// ---------- Group lottery (points-cost draws) ----------
+
+// Per-group lottery settings: cost, overall win rate, and prize pool.
+model GroupLotteryConfig {
+  id             String @id @default(cuid())
+  groupId        String @unique
+  group          Group  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  enabled        Boolean @default(false)
+  // Points deducted per draw attempt.
+  costPoints     Int     @default(10)
+  // Overall chance to win any prize, integer percent 0..100.
+  winRatePercent Int     @default(20)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  prizes GroupLotteryPrize[]
+  draws  LotteryDraw[]
+}
+
+model GroupLotteryPrize {
+  id       String             @id @default(cuid())
+  configId String
+  config   GroupLotteryConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
+
+  name          String
+  // Relative weight among active prizes when a win occurs.
+  weight        Int     @default(1)
+  // Optional points granted on win (0 = name-only prize).
+  rewardPoints  Int     @default(0)
+  sortOrder     Int     @default(0)
+  isActive      Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  draws     LotteryDraw[]
+
+  @@index([configId, isActive, sortOrder])
+}
+
+model LotteryDraw {
+  id             String      @id @default(cuid())
+  groupId        String
+  groupMemberId  String
+  groupMember    GroupMember @relation(fields: [groupMemberId], references: [id], onDelete: Cascade)
+  telegramUserId String
+
+  configId String?
+  config   GroupLotteryConfig? @relation(fields: [configId], references: [id], onDelete: SetNull)
+
+  costPoints    Int
+  won           Boolean
+  prizeId       String?
+  prize         GroupLotteryPrize? @relation(fields: [prizeId], references: [id], onDelete: SetNull)
+  prizeName     String?
+  rewardPoints  Int     @default(0)
+
+  createdAt DateTime @default(now())
+
+  @@index([groupId, createdAt])
+  @@index([groupMemberId, createdAt])
+  @@index([telegramUserId, createdAt])
 }

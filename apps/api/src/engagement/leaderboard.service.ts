@@ -123,15 +123,48 @@ export class LeaderboardService {
     now: Date = new Date(),
     limit = 10,
   ): Promise<LeaderboardResult> {
-    const take = clampLeaderboardLimit(limit);
     const monthStart = startOfMonthUtc(now);
     const today = toBusinessDayUtc(now);
+    return this.getMessageLeaderboardForRange(
+      groupId,
+      telegramUserId,
+      monthStart,
+      today,
+      limit,
+    );
+  }
+
+  /** Today's message-count activity ranking (UTC business day). */
+  async getDailyMessageLeaderboard(
+    groupId: string,
+    telegramUserId: string,
+    now: Date = new Date(),
+    limit = 10,
+  ): Promise<LeaderboardResult> {
+    const today = toBusinessDayUtc(now);
+    return this.getMessageLeaderboardForRange(
+      groupId,
+      telegramUserId,
+      today,
+      today,
+      limit,
+    );
+  }
+
+  private async getMessageLeaderboardForRange(
+    groupId: string,
+    telegramUserId: string,
+    from: Date,
+    to: Date,
+    limit: number,
+  ): Promise<LeaderboardResult> {
+    const take = clampLeaderboardLimit(limit);
 
     const grouped = await this.prisma.dailyMessageStat.groupBy({
       by: ['telegramUserId'],
       where: {
         groupId,
-        date: { gte: monthStart, lte: today },
+        date: { gte: from, lte: to },
       },
       _sum: { count: true },
     });

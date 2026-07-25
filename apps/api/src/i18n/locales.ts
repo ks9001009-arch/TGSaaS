@@ -24,6 +24,8 @@ const dict: Record<Locale, Record<string, Entry>> = {
     language_set: '✅ 已切换为简体中文。',
     help:
       '可用命令：\n/start - 打开主菜单\n/help - 帮助\n/id - 查看你的 ID / 当前会话 ID\n/getid - 查询某个用户的 ID\n/mygroups - 我的群组\n/dashboard - 管理后台',
+    help_group:
+      '群内互动命令：\n签到 或 /checkin - 每日签到\n我的 或 /me - 我的资料\n积分 或 /balance - 积分余额\n排行榜 或 /rank - 今日活跃排行\n抽奖 或 /lottery - 积分抽奖\n积分榜 或 /points - 积分排行\n消息榜 或 /messages - 本月消息排行\n\n也可点输入框旁的 / 菜单选择。',
     id_info: (v) => `你的用户 ID: \`${v.uid}\`\n当前会话 ID: \`${v.cid}\``,
     getid_prompt: '请点击下方按钮，选择一位好友分享给我，我会返回该用户的 ID 👇',
     getid_button: '👤 选择要查询的好友',
@@ -57,6 +59,8 @@ const dict: Record<Locale, Record<string, Entry>> = {
     language_set: '✅ Switched to English.',
     help:
       'Available commands:\n/start - open the main menu\n/help - help\n/id - show your ID / current chat ID\n/getid - look up another user\'s ID\n/mygroups - my groups\n/dashboard - dashboard',
+    help_group:
+      'Group engagement commands:\n签到 or /checkin - daily check-in\n我的 or /me - my profile\n积分 or /balance - points balance\n排行榜 or /rank - today activity rank\n抽奖 or /lottery - points lottery\n积分榜 or /points - points leaderboard\n消息榜 or /messages - monthly messages\n\nYou can also open the / menu next to the input box.',
     id_info: (v) => `Your user ID: \`${v.uid}\`\nCurrent chat ID: \`${v.cid}\``,
     getid_prompt: 'Tap the button below and pick a friend to share with me; I will return their user ID 👇',
     getid_button: '👤 Pick a user to look up',

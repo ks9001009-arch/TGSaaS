@@ -22,3 +22,5 @@ foundation tables and the check-in idempotency unique index.
 - `20260722000000_add_group_engagement_foundation/migration.sql` — additive DDL
 - `20260722010000_point_transaction_group_reference_unique/migration.sql` —
   `@@unique([groupId, referenceId])` for check-in concurrency
+- `20260725000000_add_group_lottery/migration.sql` — lottery config / prizes / draws
+  + `PointTransactionType.LOTTERY`
