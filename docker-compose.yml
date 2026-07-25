@@ -120,7 +120,8 @@ services:
       - api
       - web
     ports:
-      - "${NGINX_HTTP_PORT:-80}:80"
+      # Localhost only — public TLS terminates at host nginx/宝塔, which proxies here.
+      - "127.0.0.1:${NGINX_HTTP_PORT:-8080}:80"
     volumes:
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
 

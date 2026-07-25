@@ -1,12 +1,24 @@
-import { Injectable, ConflictException, UnauthorizedException, ForbiddenException } from '@nestjs/common';
+import {
+  Injectable,
+  ConflictException,
+  UnauthorizedException,
+  ForbiddenException,
+  HttpException,
+  HttpStatus,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { RbacBootstrapService } from '../rbac/rbac-bootstrap.service';
 import { RegisterDto, LoginDto } from './dto';
+import { SlidingWindowLimiter } from './rate-limit.util';
 
 @Injectable()
 export class AuthService {
+  // Blunt credential stuffing: 8 attempts / email / 10min + 30 / IP / 10min
+  private readonly loginByEmail = new SlidingWindowLimiter(8, 10 * 60 * 1000);
+  private readonly loginByIp = new SlidingWindowLimiter(30, 10 * 60 * 1000);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
@@ -54,7 +66,16 @@ export class AuthService {
     return { token: this.sign(admin), user: this.publicUser(admin) };
   }
 
-  async login(dto: LoginDto) {
+  async login(dto: LoginDto, clientIp?: string) {
+    const emailKey = (dto.email || '').trim().toLowerCase();
+    const ipKey = (clientIp || 'unknown').trim() || 'unknown';
+    if (!this.loginByEmail.allow(emailKey) || !this.loginByIp.allow(ipKey)) {
+      throw new HttpException(
+        '登录尝试过于频繁，请稍后再试',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+
     const admin = await this.prisma.admin.findUnique({ where: { email: dto.email } });
     if (!admin || !admin.active) throw new UnauthorizedException('Invalid credentials');
     const ok = await bcrypt.compare(dto.password, admin.passwordHash);

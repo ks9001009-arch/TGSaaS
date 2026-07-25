@@ -15,6 +15,13 @@ export class BotsService {
     private readonly rbac: RbacService,
   ) {}
 
+  /** Never return bot token / webhookSecret to the dashboard. */
+  private sanitizeBot<T extends { token?: string | null; webhookSecret?: string | null }>(bot: T) {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { token, webhookSecret, ...safe } = bot as any;
+    return { ...safe, token: undefined, webhookSecret: undefined, hasToken: Boolean(token) };
+  }
+
   // Bots the current admin can access (super => all tenant bots; sub => assigned).
   async list(userId: string) {
     const ctx = await this.rbac.context(userId);
@@ -24,8 +31,7 @@ export class BotsService {
       orderBy: { createdAt: 'desc' },
     });
     return bots.map((b) => ({
-      ...b,
-      token: undefined, // never leak tokens to the dashboard
+      ...this.sanitizeBot(b),
       permissions: ctx.isSuper ? ['*'] : Array.from(ctx.permissions),
     }));
   }
@@ -35,7 +41,7 @@ export class BotsService {
     if (!ctx.botIds.includes(id)) throw new NotFoundException('Bot not found');
     const bot = await this.prisma.bot.findFirst({ where: { id, tenantId: ctx.tenantId } });
     if (!bot) throw new NotFoundException('Bot not found');
-    return bot;
+    return this.sanitizeBot(bot);
   }
 
   async create(userId: string, dto: CreateBotDto) {
@@ -76,13 +82,14 @@ export class BotsService {
 
     // automated: register commands + bring the bot online (webhook or polling)
     await this.manager.startBot(bot);
-    return this.prisma.bot.findUnique({ where: { id: bot.id } });
+    const created = await this.prisma.bot.findUnique({ where: { id: bot.id } });
+    return this.sanitizeBot(created!);
   }
 
   async updateHome(userId: string, id: string, dto: UpdateBotHomeDto) {
     const ctx = await this.rbac.context(userId);
     this.rbac.assertBot(ctx, id, PERMISSIONS.BOT_EDIT);
-    return this.prisma.bot.update({
+    const updated = await this.prisma.bot.update({
       where: { id },
       data: {
         name: dto.name,
@@ -92,6 +99,7 @@ export class BotsService {
         defaultLocale: dto.defaultLocale,
       },
     });
+    return this.sanitizeBot(updated);
   }
 
   async changeToken(userId: string, id: string, dto: ChangeTokenDto) {
@@ -113,9 +121,9 @@ export class BotsService {
       where: { id },
       data: { token: dto.token, username: identity.username, telegramBotId: identity.id },
     });
-    const updated = await this.prisma.bot.findUnique({ where: { id } });
     await this.manager.restartBot(id);
-    return this.prisma.bot.findUnique({ where: { id: updated!.id } });
+    const updated = await this.prisma.bot.findUnique({ where: { id } });
+    return this.sanitizeBot(updated!);
   }
 
   async setWebhook(userId: string, id: string) {
