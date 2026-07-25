@@ -57,7 +57,7 @@ docker compose up -d --build
 #   后端健康检查: http://localhost/api/health
 ```
 
-默认演示账号：`admin@demo.local` / `admin12345`
+默认演示账号仅限本地开发且需显式设置 `ALLOW_DEMO_ADMIN=true`。生产环境不会创建该账号，若残留会被自动停用。
 
 ### 让机器人真正收消息（Webhook）
 

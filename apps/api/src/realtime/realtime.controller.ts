@@ -3,6 +3,7 @@ import { JwtService } from '@nestjs/jwt';
 import { Observable, merge, interval } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { RealtimeService } from './realtime.service';
+import { resolveJwtSecret } from '../auth/jwt-secret.util';
 
 @Controller('events')
 export class RealtimeController {
@@ -17,7 +18,7 @@ export class RealtimeController {
     let userId: string;
     try {
       const payload: any = this.jwt.verify(token, {
-        secret: process.env.JWT_SECRET || 'dev_secret',
+        secret: resolveJwtSecret(),
       });
       userId = payload.sub;
     } catch {

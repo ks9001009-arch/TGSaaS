@@ -1,7 +1,11 @@
+import { randomBytes } from 'crypto';
 import { PrismaClient } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
+
+const allowDemoAdmin = process.env.ALLOW_DEMO_ADMIN === 'true';
+const isProd = process.env.NODE_ENV === 'production';
 
 // Mirror of src/rbac/permissions.ts (inlined so the seed compiles standalone).
 const PERMISSION_CATALOG: { key: string; label: string; category: string }[] = [
@@ -91,23 +95,38 @@ async function main() {
     await setRolePerms(botAdminRole.id, BASIC);
   }
 
-  // 4) demo super admin (owns the .env platform bot's tenant)
-  const email = 'admin@demo.local';
-  const existing = await prisma.admin.findUnique({ where: { email } });
-  if (!existing) {
+  // 4) Demo admin: NEVER create in production. If a leftover demo account exists,
+  // force-disable and scramble its password on every seed.
+  const demoEmail = 'admin@demo.local';
+  const demo = await prisma.admin.findUnique({ where: { email: demoEmail } });
+  if (isProd || !allowDemoAdmin) {
+    if (demo) {
+      await prisma.admin.update({
+        where: { email: demoEmail },
+        data: {
+          active: false,
+          isSuperAdmin: false,
+          passwordHash: await bcrypt.hash(randomBytes(32).toString('hex'), 10),
+        },
+      });
+      console.log('[seed] disabled leftover demo admin admin@demo.local');
+    } else {
+      console.log('[seed] demo admin not created (set ALLOW_DEMO_ADMIN=true only for local dev)');
+    }
+  } else if (!demo) {
     await prisma.admin.create({
       data: {
         tenantId: tenant.id,
-        email,
+        email: demoEmail,
         passwordHash: await bcrypt.hash('admin12345', 10),
         displayName: 'Platform Admin',
         isSuperAdmin: true,
         roleId: superRole.id,
       },
     });
-    console.log('[seed] created demo super admin: admin@demo.local / admin12345');
+    console.log('[seed] ALLOW_DEMO_ADMIN: created demo super admin admin@demo.local');
   } else {
-    console.log('[seed] demo admin already exists, skipping');
+    console.log('[seed] demo admin already exists (dev), skipping create');
   }
 }
 

@@ -14,7 +14,9 @@ app = FastAPI(title="Telegram Listener Service")
 
 
 def _auth(token: str | None) -> None:
-    if LISTENER_TOKEN and token != LISTENER_TOKEN:
+    if not LISTENER_TOKEN:
+        raise HTTPException(status_code=503, detail="listener token not configured")
+    if token != LISTENER_TOKEN:
         raise HTTPException(status_code=401, detail="invalid listener token")
 
 

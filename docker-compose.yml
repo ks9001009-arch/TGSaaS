@@ -9,7 +9,8 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      # Bind to localhost only — never expose Postgres on the public internet.
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -22,7 +23,8 @@ services:
     image: redis:7-alpine
     restart: unless-stopped
     ports:
-      - "${REDIS_PORT:-6379}:6379"
+      # Bind to localhost only — Redis must not be reachable from the public internet.
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
     volumes:
       - redisdata:/data
     healthcheck:
@@ -68,7 +70,8 @@ services:
     expose:
       - "${API_PORT:-4000}"
     ports:
-      - "${API_PORT:-4000}:${API_PORT:-4000}"
+      # Prefer accessing API via nginx; keep direct port localhost-only.
+      - "127.0.0.1:${API_PORT:-4000}:${API_PORT:-4000}"
 
   web:
     build:
@@ -85,7 +88,7 @@ services:
     expose:
       - "3000"
     ports:
-      - "${WEB_PORT:-3000}:3000"
+      - "127.0.0.1:${WEB_PORT:-3000}:3000"
 
   # Python (Telethon) MTProto listener — real Telegram accounts (NOT bot tokens).
   listener:
