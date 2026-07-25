@@ -356,6 +356,11 @@ export class TelegramService {
   private async onHelp(ctx: Context, botId: string) {
     const locale = await this.getUserLocale(botId, ctx.from?.id);
     if (this.isGroupChat(ctx)) {
+      const group = await this.loadGroup(botId, String(ctx.chat!.id));
+      if (group) {
+        await this.replyWithGroupButtons(ctx, group, t(locale, 'help_group'));
+        return;
+      }
       await ctx.reply(t(locale, 'help_group'));
       return;
     }
@@ -411,6 +416,39 @@ export class TelegramService {
     return lines.join('\n');
   }
 
+  /** Group welcome buttons (商务合作等) attached under bot replies. */
+  private async groupButtonsKeyboard(group: {
+    id: string;
+    botId: string;
+    welcome?: { buttons?: Array<{
+      label: string;
+      type: string;
+      url?: string | null;
+      callbackData?: string | null;
+      emoji?: string | null;
+      row: number;
+      position: number;
+    }> } | null;
+  }): Promise<InlineKeyboard | undefined> {
+    const buttons = group.welcome?.buttons || [];
+    const kb = buildKeyboard(buttons);
+    return this.appendAdsToKeyboard(kb, group.botId, group.id, 'WELCOME');
+  }
+
+  private async replyWithGroupButtons(
+    ctx: Context,
+    group: {
+      id: string;
+      botId: string;
+      welcome?: { buttons?: any[] } | null;
+    },
+    text: string,
+    extra: Record<string, unknown> = {},
+  ) {
+    const kb = await this.groupButtonsKeyboard(group);
+    await ctx.reply(text, { ...extra, reply_markup: kb });
+  }
+
   private async onCheckin(ctx: Context, botId: string) {
     // group / supergroup only; private & channel ignored (same as other group tools).
     if (!this.isGroupChat(ctx) || !ctx.from?.id) return;
@@ -430,7 +468,9 @@ export class TelegramService {
       });
 
       if (result.status === 'already_checked_in') {
-        await ctx.reply(
+        await this.replyWithGroupButtons(
+          ctx,
+          group,
           `今日已签到过啦。\n连续签到：${result.streak} 天\n当前积分：${result.member.points}`,
         );
         return;
@@ -440,12 +480,14 @@ export class TelegramService {
         result.bonusPoints > 0
           ? `\n连续 ${result.streak} 天奖励：+${result.bonusPoints}`
           : '';
-      await ctx.reply(
+      await this.replyWithGroupButtons(
+        ctx,
+        group,
         `签到成功！\n基础积分：+${result.basePoints}${bonusLine}\n本次获得：+${result.pointsAwarded}\n连续签到：${result.streak} 天\n当前积分：${result.member.points}`,
       );
     } catch (e: any) {
       this.logger.warn(`checkin failed: ${e.message}`);
-      await ctx.reply('签到失败，请稍后再试。');
+      await this.replyWithGroupButtons(ctx, group, '签到失败，请稍后再试。');
     }
   }
 
@@ -466,7 +508,9 @@ export class TelegramService {
         lastName: ctx.from.last_name ?? null,
       });
 
-      await ctx.reply(
+      await this.replyWithGroupButtons(
+        ctx,
+        group,
         [
           '我的互动档案',
           `用户：${summary.displayName}`,
@@ -479,7 +523,7 @@ export class TelegramService {
       );
     } catch (e: any) {
       this.logger.warn(`profile failed: ${e.message}`);
-      await ctx.reply('查询失败，请稍后再试。');
+      await this.replyWithGroupButtons(ctx, group, '查询失败，请稍后再试。');
     }
   }
 
@@ -499,10 +543,10 @@ export class TelegramService {
         firstName: ctx.from.first_name ?? null,
         lastName: ctx.from.last_name ?? null,
       });
-      await ctx.reply(`你的积分余额：${summary.points}`);
+      await this.replyWithGroupButtons(ctx, group, `你的积分余额：${summary.points}`);
     } catch (e: any) {
       this.logger.warn(`points balance failed: ${e.message}`);
-      await ctx.reply('查询失败，请稍后再试。');
+      await this.replyWithGroupButtons(ctx, group, '查询失败，请稍后再试。');
     }
   }
 
@@ -521,10 +565,14 @@ export class TelegramService {
         new Date(),
         10,
       );
-      await ctx.reply(this.formatLeaderboardMessage('今日活跃排行 TOP10', ' 条', result));
+      await this.replyWithGroupButtons(
+        ctx,
+        group,
+        this.formatLeaderboardMessage('今日活跃排行 TOP10', ' 条', result),
+      );
     } catch (e: any) {
       this.logger.warn(`daily rank failed: ${e.message}`);
-      await ctx.reply('排行榜查询失败，请稍后再试。');
+      await this.replyWithGroupButtons(ctx, group, '排行榜查询失败，请稍后再试。');
     }
   }
 
@@ -546,15 +594,17 @@ export class TelegramService {
       });
 
       if (result.status === 'disabled') {
-        await ctx.reply('本群抽奖尚未开启，请联系管理员在后台配置。');
+        await this.replyWithGroupButtons(ctx, group, '本群抽奖尚未开启，请联系管理员在后台配置。');
         return;
       }
       if (result.status === 'no_prizes') {
-        await ctx.reply('奖池暂无可用奖品，请联系管理员配置。');
+        await this.replyWithGroupButtons(ctx, group, '奖池暂无可用奖品，请联系管理员配置。');
         return;
       }
       if (result.status === 'insufficient_points') {
-        await ctx.reply(
+        await this.replyWithGroupButtons(
+          ctx,
+          group,
           `积分不足。\n每次抽奖消耗：${result.costPoints}\n当前积分：${result.points}`,
         );
         return;
@@ -563,18 +613,22 @@ export class TelegramService {
       if (result.won) {
         const rewardLine =
           result.rewardPoints > 0 ? `\n奖励积分：+${result.rewardPoints}` : '';
-        await ctx.reply(
+        await this.replyWithGroupButtons(
+          ctx,
+          group,
           `恭喜中奖！\n奖品：${result.prizeName}${rewardLine}\n消耗积分：-${result.costPoints}\n当前积分：${result.pointsAfter}`,
         );
         return;
       }
 
-      await ctx.reply(
+      await this.replyWithGroupButtons(
+        ctx,
+        group,
         `很遗憾，未中奖。\n消耗积分：-${result.costPoints}\n当前积分：${result.pointsAfter}`,
       );
     } catch (e: any) {
       this.logger.warn(`lottery failed: ${e.message}`);
-      await ctx.reply('抽奖失败，请稍后再试。');
+      await this.replyWithGroupButtons(ctx, group, '抽奖失败，请稍后再试。');
     }
   }
 
@@ -592,10 +646,14 @@ export class TelegramService {
         String(ctx.from.id),
         10,
       );
-      await ctx.reply(this.formatLeaderboardMessage('积分榜 TOP10', ' 分', result));
+      await this.replyWithGroupButtons(
+        ctx,
+        group,
+        this.formatLeaderboardMessage('积分榜 TOP10', ' 分', result),
+      );
     } catch (e: any) {
       this.logger.warn(`points leaderboard failed: ${e.message}`);
-      await ctx.reply('排行榜查询失败，请稍后再试。');
+      await this.replyWithGroupButtons(ctx, group, '排行榜查询失败，请稍后再试。');
     }
   }
 
@@ -614,10 +672,14 @@ export class TelegramService {
         new Date(),
         10,
       );
-      await ctx.reply(this.formatLeaderboardMessage('本月消息榜 TOP10', ' 条', result));
+      await this.replyWithGroupButtons(
+        ctx,
+        group,
+        this.formatLeaderboardMessage('本月消息榜 TOP10', ' 条', result),
+      );
     } catch (e: any) {
       this.logger.warn(`message leaderboard failed: ${e.message}`);
-      await ctx.reply('排行榜查询失败，请稍后再试。');
+      await this.replyWithGroupButtons(ctx, group, '排行榜查询失败，请稍后再试。');
     }
   }
 
@@ -1737,7 +1799,7 @@ export class TelegramService {
     // auto replies
     for (const ar of group.autoReplies || []) {
       if (matchKeyword(text, { ...ar, action: 'NONE' } as any)) {
-        await ctx.reply(ar.response);
+        await this.replyWithGroupButtons(ctx, group, ar.response);
         break;
       }
     }
@@ -1996,7 +2058,7 @@ export class TelegramService {
     const group = await this.prisma.group.findUnique({
       where: { botId_telegramChatId: { botId, telegramChatId: chatId } },
       include: {
-        welcome: { include: { buttons: true } },
+        welcome: { include: { buttons: { orderBy: [{ row: 'asc' }, { position: 'asc' }] } } },
         verification: true,
         channelGate: true,
         filter: true,
