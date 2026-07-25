@@ -334,7 +334,7 @@ export class TelegramService {
     await ctx.reply(t(locale, 'getid_prompt'), { reply_markup: kb });
   }
 
-  // ---------- group engagement: /签到 /我的 /积分榜 /消息榜 ----------
+  // ---------- group engagement: 签到 / 我的 / 积分榜 / 消息榜（斜杠可选） ----------
 
   private isGroupChat(ctx: Context): boolean {
     const type = ctx.chat?.type;

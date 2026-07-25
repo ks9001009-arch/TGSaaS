@@ -55,8 +55,19 @@ describe('isCountableGroupUserMessage', () => {
     ).toBe(true);
   });
 
-  it('rejects engagement commands', () => {
-    for (const text of ['/签到', '/我的', '/积分榜', '/消息榜', '/积分榜@MyBot']) {
+  it('rejects engagement commands (with or without slash)', () => {
+    for (const text of [
+      '/签到',
+      '签到',
+      '/我的',
+      '我的',
+      '/积分榜',
+      '积分榜',
+      '/消息榜',
+      '消息榜',
+      '/积分榜@MyBot',
+      '签到@MyBot',
+    ]) {
       expect(
         isCountableGroupUserMessage({
           ...base(),

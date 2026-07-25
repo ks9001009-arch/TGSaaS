@@ -132,7 +132,9 @@ export default function EngagementOverview({ groupId }: { groupId: string }) {
       <div className="flex items-center justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold">互动运营总览</h2>
-          <p className="text-sm text-tg-muted">今日数据 · 群组概况 · 排行榜 · 近 7 天趋势（UTC）</p>
+          <p className="text-sm text-tg-muted">
+            群内发送「签到 / 我的 / 积分榜 / 消息榜」（可带或不带 /）· 今日数据 · 排行榜 · 近 7 天趋势（UTC）
+          </p>
         </div>
         <button onClick={load} className="btn-ghost h-9 text-xs" disabled={loading}>
           <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /> 刷新
