@@ -1067,6 +1067,10 @@ export class TelegramService {
     } else {
       kb.text('✅ 我是真人', `verify:${group.id}:${member.id}:human`);
     }
+    // Admin-only manual review (non-admins get an alert on tap).
+    kb.row()
+      .text('✅ 通过', `vadmin:pass:${group.id}:${member.id}`)
+      .text('❌ 拒绝', `vadmin:reject:${group.id}:${member.id}`);
 
     await ctx.reply(
       `👋 ${name}，欢迎！请在 ${v.timeoutSeconds} 秒内完成验证：\n\n${challenge.prompt}`,
@@ -1535,6 +1539,11 @@ export class TelegramService {
       return;
     }
 
+    if (data.startsWith('vadmin:')) {
+      await this.handleVerifyAdminCallback(ctx, data);
+      return;
+    }
+
     if (data.startsWith('cgate:')) {
       await this.handleChannelGateCallback(ctx, data);
       return;
@@ -1606,7 +1615,7 @@ export class TelegramService {
       where: { id: groupId },
       include: { welcome: { include: { buttons: true } }, verification: true, channelGate: true },
     });
-    if (!pending || !group) {
+    if (!pending || !group || pending.status !== 'PENDING') {
       await ctx.answerCallbackQuery({ text: '验证已失效。' });
       return;
     }
@@ -1617,41 +1626,8 @@ export class TelegramService {
     }
 
     if (pending.answer === answer) {
-      await this.prisma.pendingVerification.update({
-        where: { id: pending.id },
-        data: { status: 'PASSED' },
-      });
-      await this.incStat(groupId, 'verified');
-      await this.log(groupId, 'VERIFY_PASS', null, userId);
       await ctx.answerCallbackQuery({ text: '✅ 验证通过！' });
-      try {
-        await ctx.deleteMessage();
-      } catch {}
-
-      const cg = group.channelGate;
-      if (cg && cg.enabled && cg.channel) {
-        // verification passed but the channel-follow gate is also enabled:
-        // keep the user muted and ask them to follow the channel next.
-        await this.startChannelGate(ctx, group, ctx.from);
-      } else {
-        try {
-          await ctx.api.restrictChatMember(Number(group.telegramChatId), Number(userId), {
-            can_send_messages: true,
-            can_send_other_messages: true,
-            can_send_polls: true,
-            can_add_web_page_previews: true,
-          });
-        } catch (e: any) {
-          this.logger.warn(`unrestrict failed: ${e.message}`);
-        }
-        await this.sendWelcome(ctx, group, ctx.from);
-        await this.sendPlacementAds(ctx, group.botId, group.id, 'POST_VERIFY');
-        await this.renderGroupKind(ctx, group, 'VERIFY', {
-          first_name: ctx.from?.first_name || '',
-          username: ctx.from?.username ? `@${ctx.from.username}` : '',
-          group_name: group.title,
-        });
-      }
+      await this.completeVerificationPass(ctx, group, userId, ctx.from);
     } else {
       const attempts = pending.attempts + 1;
       await this.prisma.pendingVerification.update({
@@ -1663,6 +1639,130 @@ export class TelegramService {
         await this.applyFailAction(ctx, group, Number(userId));
       }
     }
+  }
+
+  /** Admin-only pass/reject on pending verification. */
+  private async handleVerifyAdminCallback(ctx: Context, data: string) {
+    // vadmin:pass|reject:<groupId>:<userId>
+    const parts = data.split(':');
+    if (parts.length < 4) {
+      await ctx.answerCallbackQuery({ text: '无效操作' });
+      return;
+    }
+    const action = parts[1]; // pass | reject
+    const groupId = parts[2];
+    const userId = parts[3];
+
+    const group = await this.prisma.group.findUnique({
+      where: { id: groupId },
+      include: { welcome: { include: { buttons: true } }, verification: true, channelGate: true },
+    });
+    if (!group) {
+      await ctx.answerCallbackQuery({ text: '验证已失效。' });
+      return;
+    }
+
+    const clickerId = ctx.from?.id;
+    if (!clickerId) {
+      await ctx.answerCallbackQuery({ text: '无效操作' });
+      return;
+    }
+    const isAdmin = await this.isTelegramGroupAdmin(ctx, group.telegramChatId, clickerId);
+    if (!isAdmin) {
+      await ctx.answerCallbackQuery({ text: '仅群管理员可操作', show_alert: true });
+      return;
+    }
+
+    const pending = await this.prisma.pendingVerification.findUnique({
+      where: { groupId_telegramUserId: { groupId, telegramUserId: userId } },
+    });
+    if (!pending || pending.status !== 'PENDING') {
+      await ctx.answerCallbackQuery({ text: '验证已失效。' });
+      return;
+    }
+
+    if (action === 'pass') {
+      let memberUser: any = { id: Number(userId), first_name: '新成员' };
+      try {
+        const m = await ctx.api.getChatMember(Number(group.telegramChatId), Number(userId));
+        memberUser = m.user;
+      } catch {}
+      await ctx.answerCallbackQuery({ text: '已手动通过验证' });
+      await this.completeVerificationPass(ctx, group, userId, memberUser);
+      await this.log(groupId, 'VERIFY_ADMIN_PASS', String(clickerId), userId);
+      return;
+    }
+
+    if (action === 'reject') {
+      await this.prisma.pendingVerification.update({
+        where: { id: pending.id },
+        data: { status: 'FAILED' },
+      });
+      await ctx.answerCallbackQuery({ text: '已拒绝该用户' });
+      try {
+        await ctx.deleteMessage();
+      } catch {}
+      await this.applyFailAction(ctx, group, Number(userId));
+      await this.log(groupId, 'VERIFY_ADMIN_REJECT', String(clickerId), userId);
+      return;
+    }
+
+    await ctx.answerCallbackQuery({ text: '无效操作' });
+  }
+
+  private async isTelegramGroupAdmin(
+    ctx: Context,
+    chatId: string | number,
+    userId: number,
+  ): Promise<boolean> {
+    try {
+      const m = await ctx.api.getChatMember(Number(chatId), userId);
+      return m.status === 'creator' || m.status === 'administrator';
+    } catch {
+      return false;
+    }
+  }
+
+  /** Shared pass path for self-verify success and admin manual pass. */
+  private async completeVerificationPass(
+    ctx: Context,
+    group: any,
+    userId: string,
+    member: any,
+  ) {
+    await this.prisma.pendingVerification.updateMany({
+      where: { groupId: group.id, telegramUserId: userId, status: 'PENDING' },
+      data: { status: 'PASSED' },
+    });
+    await this.incStat(group.id, 'verified');
+    await this.log(group.id, 'VERIFY_PASS', null, userId);
+    try {
+      await ctx.deleteMessage();
+    } catch {}
+
+    const cg = group.channelGate;
+    if (cg && cg.enabled && cg.channel) {
+      await this.startChannelGate(ctx, group, member);
+      return;
+    }
+
+    try {
+      await ctx.api.restrictChatMember(Number(group.telegramChatId), Number(userId), {
+        can_send_messages: true,
+        can_send_other_messages: true,
+        can_send_polls: true,
+        can_add_web_page_previews: true,
+      });
+    } catch (e: any) {
+      this.logger.warn(`unrestrict failed: ${e.message}`);
+    }
+    await this.sendWelcome(ctx, group, member);
+    await this.sendPlacementAds(ctx, group.botId, group.id, 'POST_VERIFY');
+    await this.renderGroupKind(ctx, group, 'VERIFY', {
+      first_name: member?.first_name || '',
+      username: member?.username ? `@${member.username}` : '',
+      group_name: group.title,
+    });
   }
 
   private async applyFailAction(ctx: Context, group: any, userId: number) {
