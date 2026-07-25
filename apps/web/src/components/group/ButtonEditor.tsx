@@ -114,9 +114,16 @@ export default function ButtonEditor({ group, reload }: { group: any; reload: ()
                 className="input"
                 value={b.url}
                 onChange={(e) => update(i, { url: e.target.value })}
-                placeholder="https://t.me/..."
+                placeholder="https://t.me/客服用户名 或 @username"
               />
             </div>
+            {(b.type === 'SUPPORT' || b.type === 'BOT' || b.type === 'TELEGRAM_GROUP' || b.type === 'TELEGRAM_CHANNEL' || b.type === 'URL') && (
+              <p className="mt-1 text-[11px] text-tg-muted">
+                {b.type === 'CALLBACK'
+                  ? '回调按钮不会打开链接'
+                  : '填写链接后点击会直接跳转；客服类型也请填写 https://t.me/... 或 @用户名'}
+              </p>
+            )}
             <div className="mt-2 flex items-center justify-between">
               <label className="flex items-center gap-2 text-xs text-tg-muted">
                 行号
@@ -171,7 +178,8 @@ export default function ButtonEditor({ group, reload }: { group: any; reload: ()
           {buttons.length === 0 && <p className="text-sm text-tg-muted">暂无按钮</p>}
         </div>
         <p className="mt-3 text-xs text-tg-muted">
-          支持：群 / 频道 / Bot / 客服 / 网页 / 任意 URL，一行多个按钮、排序、Emoji 与点击统计。
+          支持：群 / 频道 / Bot / 客服 / 网页。只要填了链接就会跳转；类型选「回调」才不会打开链接。
+          一行多个按钮、排序、Emoji 与点击统计。
         </p>
       </div>
     </div>
