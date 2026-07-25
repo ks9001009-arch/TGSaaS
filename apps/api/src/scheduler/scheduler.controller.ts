@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, ForbiddenException, Get, NotFoundException, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, ForbiddenException, Get, NotFoundException, Param, Patch, Post, UseGuards, BadRequestException } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser, AuthUser } from '../common/current-user.decorator';
 import { PrismaService } from '../prisma/prisma.service';
@@ -24,6 +24,32 @@ export class SchedulerController {
     return ctx;
   }
 
+  /** Only allow sending to tenant ACTIVE groups or registered channels for this bot. */
+  private async assertTargetAllowed(ctx: { tenantId: string; groupIds: string[]; isSuper: boolean }, botId: string, targetChatId: string) {
+    const chatId = String(targetChatId);
+    const group = await this.prisma.group.findFirst({
+      where: {
+        tenantId: ctx.tenantId,
+        botId,
+        telegramChatId: chatId,
+        status: { not: 'LEFT' },
+      },
+      select: { id: true },
+    });
+    if (group) {
+      if (!ctx.isSuper && !ctx.groupIds.includes(group.id)) {
+        throw new ForbiddenException('无权向该群组发送定时消息');
+      }
+      return;
+    }
+    const channel = await this.prisma.channel.findFirst({
+      where: { tenantId: ctx.tenantId, botId, chatId },
+      select: { id: true },
+    });
+    if (channel) return;
+    throw new BadRequestException('目标会话不在本租户已登记的群组/频道内');
+  }
+
   @Get('posts')
   async list(@CurrentUser() u: AuthUser) {
     const ctx = await this.rbac.context(u.userId);
@@ -36,6 +62,7 @@ export class SchedulerController {
   @Post('posts')
   async create(@CurrentUser() u: AuthUser, @Body() body: any) {
     const ctx = await this.assertBot(u.userId, body.botId);
+    await this.assertTargetAllowed(ctx, body.botId, body.targetChatId);
     const nextRunAt = this.scheduler.computeNextRun({
       scheduleType: body.scheduleType || 'DAILY',
       intervalMinutes: Number(body.intervalMinutes) || 0,

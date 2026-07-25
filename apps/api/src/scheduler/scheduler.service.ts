@@ -55,6 +55,17 @@ export class SchedulerService implements OnModuleInit {
           where: { botId: post.botId, telegramChatId: post.targetChatId },
           select: { status: true },
         });
+        const channel = group
+          ? null
+          : await this.prisma.channel.findFirst({
+              where: { botId: post.botId, chatId: post.targetChatId },
+              select: { id: true },
+            });
+        // Refuse arbitrary chatIds that are not registered groups/channels
+        if (!group && !channel) {
+          this.logger.warn(`scheduled post ${post.id} skipped: target not registered`);
+          continue;
+        }
         if (group && group.status === 'LEFT') continue;
         await this.telegram.sendMessage(bot, post.targetChatId, post.text);
         this.logger.log(`Sent scheduled post ${post.id} -> ${post.targetChatId}`);

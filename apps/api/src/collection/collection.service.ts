@@ -248,7 +248,16 @@ export class CollectionService {
     const where: any = { tenantId: ctx.tenantId };
     if (!ctx.isSuper) where.groupId = { in: ctx.groupIds.length ? ctx.groupIds : ['__none__'] };
     if (query.platform === 'INSTAGRAM' || query.platform === 'TIKTOK') where.platform = query.platform;
-    if (query.groupId) where.groupId = query.groupId;
+    // Prevent IDOR: query.groupId must stay inside the caller's scoped groups
+    if (query.groupId) {
+      if (ctx.isSuper) {
+        where.groupId = query.groupId;
+      } else if (ctx.groupIds.includes(query.groupId)) {
+        where.groupId = query.groupId;
+      } else {
+        where.groupId = '__none__';
+      }
+    }
     if (query.q && query.q.trim()) {
       where.normalizedUsername = { contains: query.q.trim().replace(/^@/, '').toLowerCase() };
     }
