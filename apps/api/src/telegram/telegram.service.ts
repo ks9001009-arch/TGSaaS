@@ -476,14 +476,10 @@ export class TelegramService {
         return;
       }
 
-      const bonusLine =
-        result.bonusPoints > 0
-          ? `\n连续 ${result.streak} 天奖励：+${result.bonusPoints}`
-          : '';
       await this.replyWithGroupButtons(
         ctx,
         group,
-        `签到成功！\n基础积分：+${result.basePoints}${bonusLine}\n本次获得：+${result.pointsAwarded}\n连续签到：${result.streak} 天\n当前积分：${result.member.points}`,
+        `签到成功！\n本次获得：+${result.pointsAwarded}\n连续签到：${result.streak} 天\n当前积分：${result.member.points}`,
       );
     } catch (e: any) {
       this.logger.warn(`checkin failed: ${e.message}`);
