@@ -4,8 +4,23 @@ import { useState } from 'react';
 import { Plus, Trash2, Download } from 'lucide-react';
 import { api } from '@/lib/api';
 
-const ACTIONS = ['DELETE', 'WARN', 'MUTE', 'KICK', 'BAN'];
-const MATCHES = ['CONTAINS', 'EXACT', 'REGEX'];
+const ACTIONS: { v: string; l: string }[] = [
+  { v: 'DELETE', l: '删除消息' },
+  { v: 'WARN', l: '警告' },
+  { v: 'MUTE', l: '禁言' },
+  { v: 'KICK', l: '踢出群' },
+  { v: 'BAN', l: '封禁' },
+];
+
+const MATCHES: { v: string; l: string }[] = [
+  { v: 'CONTAINS', l: '包含' },
+  { v: 'EXACT', l: '精确匹配' },
+  { v: 'REGEX', l: '正则表达式' },
+];
+
+function labelOf(list: { v: string; l: string }[], value: string) {
+  return list.find((x) => x.v === value)?.l || value;
+}
 
 export default function KeywordsEditor({ group, reload }: { group: any; reload: () => Promise<void> }) {
   const [pattern, setPattern] = useState('');
@@ -55,7 +70,9 @@ export default function KeywordsEditor({ group, reload }: { group: any; reload: 
           <label className="label">匹配方式</label>
           <select className="input" value={match} onChange={(e) => setMatch(e.target.value)}>
             {MATCHES.map((m) => (
-              <option key={m}>{m}</option>
+              <option key={m.v} value={m.v}>
+                {m.l}
+              </option>
             ))}
           </select>
         </div>
@@ -63,7 +80,9 @@ export default function KeywordsEditor({ group, reload }: { group: any; reload: 
           <label className="label">处理动作</label>
           <select className="input" value={action} onChange={(e) => setAction(e.target.value)}>
             {ACTIONS.map((a) => (
-              <option key={a}>{a}</option>
+              <option key={a.v} value={a.v}>
+                {a.l}
+              </option>
             ))}
           </select>
         </div>
@@ -77,8 +96,8 @@ export default function KeywordsEditor({ group, reload }: { group: any; reload: 
           <div key={k.id} className="flex items-center justify-between py-2 text-sm">
             <div className="flex items-center gap-2">
               <span className="font-mono">{k.pattern}</span>
-              <span className="badge bg-white/5 text-tg-muted">{k.match}</span>
-              <span className="badge bg-tg-amber/15 text-tg-amber">{k.action}</span>
+              <span className="badge bg-white/5 text-tg-muted">{labelOf(MATCHES, k.match)}</span>
+              <span className="badge bg-tg-amber/15 text-tg-amber">{labelOf(ACTIONS, k.action)}</span>
             </div>
             <button onClick={() => del(k.id)} className="btn-danger p-1.5">
               <Trash2 className="h-3.5 w-3.5" />
