@@ -1242,7 +1242,7 @@ model GroupLotteryPrize {
   config   GroupLotteryConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
 
   name          String
-  // Relative weight among active prizes when a win occurs.
+  // Relative percent among active prizes when a win occurs (1..100; active sum must be 100).
   weight        Int     @default(1)
   // Optional points granted on win (0 = name-only prize).
   rewardPoints  Int     @default(0)

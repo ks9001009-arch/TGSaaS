@@ -295,11 +295,28 @@ export class LotteryService {
       if (!p.name?.trim() || p.name.trim().length > 80) {
         throw new BadRequestException('each prize needs a name (1..80 chars)');
       }
-      if (!Number.isInteger(p.weight) || p.weight < 1 || p.weight > 10000) {
-        throw new BadRequestException('prize weight must be an integer between 1 and 10000');
+      // weight = percent among active prizes when a win occurs (0..100).
+      if (!Number.isInteger(p.weight) || p.weight < 0 || p.weight > 100) {
+        throw new BadRequestException('prize percent must be an integer between 0 and 100');
       }
       if (!Number.isInteger(p.rewardPoints) || p.rewardPoints < 0 || p.rewardPoints > 1_000_000) {
         throw new BadRequestException('prize rewardPoints must be an integer between 0 and 1000000');
+      }
+    }
+
+    const active = input.prizes.filter((p) => p.isActive);
+    if (active.length === 0) {
+      throw new BadRequestException('at least one active prize is required');
+    }
+    const percentSum = active.reduce((sum, p) => sum + p.weight, 0);
+    if (percentSum !== 100) {
+      throw new BadRequestException(
+        `已启用奖品的概率合计必须为 100%（当前 ${percentSum}%）`,
+      );
+    }
+    for (const p of active) {
+      if (p.weight < 1) {
+        throw new BadRequestException('each active prize percent must be at least 1');
       }
     }
   }

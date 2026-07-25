@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Plus, Save, Trash2 } from 'lucide-react';
 import { api } from '@/lib/api';
 
@@ -22,10 +22,10 @@ type LotteryConfig = {
   prizes: Prize[];
 };
 
-function emptyPrize(sortOrder: number): Prize {
+function emptyPrize(sortOrder: number, percent = 0): Prize {
   return {
     name: '',
-    weight: 1,
+    weight: percent,
     rewardPoints: 0,
     sortOrder,
     isActive: true,
@@ -36,11 +36,16 @@ export default function LotteryEditor({ groupId }: { groupId: string }) {
   const [enabled, setEnabled] = useState(false);
   const [costPoints, setCostPoints] = useState(10);
   const [winRatePercent, setWinRatePercent] = useState(20);
-  const [prizes, setPrizes] = useState<Prize[]>([emptyPrize(0)]);
+  const [prizes, setPrizes] = useState<Prize[]>([emptyPrize(0, 100)]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
+
+  const activePercentSum = useMemo(
+    () => prizes.filter((p) => p.isActive).reduce((sum, p) => sum + Number(p.weight || 0), 0),
+    [prizes],
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -60,7 +65,7 @@ export default function LotteryEditor({ groupId }: { groupId: string }) {
               sortOrder: p.sortOrder ?? i,
               isActive: p.isActive ?? true,
             }))
-          : [emptyPrize(0)],
+          : [emptyPrize(0, 100)],
       );
     } catch (e: any) {
       setError(e.message || '加载失败');
@@ -78,7 +83,7 @@ export default function LotteryEditor({ groupId }: { groupId: string }) {
   }
 
   function addPrize() {
-    setPrizes((prev) => [...prev, emptyPrize(prev.length)]);
+    setPrizes((prev) => [...prev, emptyPrize(prev.length, 0)]);
   }
 
   function removePrize(index: number) {
@@ -89,6 +94,11 @@ export default function LotteryEditor({ groupId }: { groupId: string }) {
     setSaving(true);
     setSaved(false);
     setError('');
+    if (activePercentSum !== 100) {
+      setError(`已启用奖品的概率合计须为 100%（当前 ${activePercentSum}%）`);
+      setSaving(false);
+      return;
+    }
     try {
       await api.put(`/groups/${groupId}/engagement/lottery`, {
         enabled,
@@ -122,7 +132,7 @@ export default function LotteryEditor({ groupId }: { groupId: string }) {
         <div>
           <h2 className="font-semibold">积分抽奖</h2>
           <p className="mt-1 text-xs text-tg-muted">
-            群成员发送「抽奖」消耗积分参与。总中奖率决定是否中奖；中奖后再按奖品权重抽取具体奖品。
+            群成员发送「抽奖」消耗积分参与。总中奖率决定是否中奖；中奖后再按各奖品概率（%）分配具体奖品。
           </p>
         </div>
         <label className="flex items-center gap-2 text-sm">
@@ -156,11 +166,18 @@ export default function LotteryEditor({ groupId }: { groupId: string }) {
       </div>
 
       <div className="space-y-3">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-sm font-medium">奖品池</h3>
-          <button type="button" className="btn-ghost text-xs" onClick={addPrize}>
-            <Plus className="h-3.5 w-3.5" /> 添加奖品
-          </button>
+          <div className="flex items-center gap-3">
+            <span
+              className={`text-xs ${activePercentSum === 100 ? 'text-emerald-400' : 'text-amber-400'}`}
+            >
+              已启用概率合计：{activePercentSum}%（须为 100%）
+            </span>
+            <button type="button" className="btn-ghost text-xs" onClick={addPrize}>
+              <Plus className="h-3.5 w-3.5" /> 添加奖品
+            </button>
+          </div>
         </div>
 
         {prizes.map((p, index) => (
@@ -178,11 +195,12 @@ export default function LotteryEditor({ groupId }: { groupId: string }) {
               />
             </div>
             <div className="sm:col-span-2">
-              <label className="label">权重</label>
+              <label className="label">概率（%）</label>
               <input
                 className="input"
                 type="number"
-                min={1}
+                min={0}
+                max={100}
                 value={p.weight}
                 onChange={(e) => updatePrize(index, { weight: Number(e.target.value) })}
               />

@@ -140,7 +140,7 @@ describe('LotteryService.draw', () => {
       enabled: true,
       costPoints: 10,
       winRatePercent: 50,
-      prizes: [{ id: 'p1', name: '礼包', weight: 1, rewardPoints: 30 }],
+      prizes: [{ id: 'p1', name: '礼包', weight: 100, rewardPoints: 30 }],
     });
     groupMember.upsert.mockResolvedValue({
       id: 'm1',
@@ -183,5 +183,71 @@ describe('LotteryService.draw', () => {
         type: PointTransactionType.REWARD,
       }),
     });
+  });
+});
+
+describe('LotteryService.validateConfigInput via upsertConfig', () => {
+  const prisma = {
+    group: { findUnique: jest.fn(), findFirst: jest.fn() },
+    groupLotteryConfig: { upsert: jest.fn(), findUniqueOrThrow: jest.fn() },
+    groupLotteryPrize: { deleteMany: jest.fn(), updateMany: jest.fn(), create: jest.fn() },
+    $transaction: jest.fn(),
+  };
+  const rbac = {
+    context: jest.fn().mockResolvedValue({ tenantId: 't1', isSuper: true, permissions: new Set() }),
+    assertGroup: jest.fn(),
+  };
+  let service: LotteryService;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prisma.group.findUnique.mockResolvedValue({ id: 'g1' });
+    prisma.group.findFirst.mockResolvedValue({ id: 'g1' });
+    service = new LotteryService(prisma as never, rbac as never);
+  });
+
+  it('rejects active prize percents that do not sum to 100', async () => {
+    await expect(
+      service.upsertConfig('u1', 'g1', {
+        enabled: true,
+        costPoints: 10,
+        winRatePercent: 20,
+        prizes: [
+          { name: 'A', weight: 30, rewardPoints: 0, sortOrder: 0, isActive: true },
+          { name: 'B', weight: 30, rewardPoints: 0, sortOrder: 1, isActive: true },
+        ],
+      }),
+    ).rejects.toThrow(/100%/);
+  });
+
+  it('accepts active prize percents that sum to 100', async () => {
+    prisma.$transaction.mockImplementation(async (fn: any) =>
+      fn({
+        groupLotteryConfig: {
+          upsert: jest.fn().mockResolvedValue({ id: 'c1' }),
+          findUniqueOrThrow: jest.fn().mockResolvedValue({
+            id: 'c1',
+            prizes: [],
+          }),
+        },
+        groupLotteryPrize: {
+          deleteMany: jest.fn(),
+          updateMany: jest.fn(),
+          create: jest.fn(),
+        },
+      }),
+    );
+
+    await expect(
+      service.upsertConfig('u1', 'g1', {
+        enabled: true,
+        costPoints: 10,
+        winRatePercent: 20,
+        prizes: [
+          { name: 'A', weight: 70, rewardPoints: 0, sortOrder: 0, isActive: true },
+          { name: 'B', weight: 30, rewardPoints: 0, sortOrder: 1, isActive: true },
+        ],
+      }),
+    ).resolves.toBeTruthy();
   });
 });
