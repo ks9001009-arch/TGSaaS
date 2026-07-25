@@ -14,9 +14,11 @@ import KeywordsEditor from '@/components/group/KeywordsEditor';
 import FilterEditor from '@/components/group/FilterEditor';
 import ListEditor from '@/components/group/ListEditor';
 import LogsView from '@/components/group/LogsView';
+import EngagementOverview from '@/components/group/EngagementOverview';
 
 // each tab is shown only if the admin holds (one of) the relevant permission(s)
 const TAB_DEFS: { id: string; label: string; perms: string[] }[] = [
+  { id: 'engagement', label: '互动总览', perms: [PERM.GROUPS_VIEW] },
   { id: 'welcome', label: '欢迎消息', perms: [PERM.WELCOME_EDIT] },
   { id: 'buttons', label: '按钮编辑器', perms: [PERM.WELCOME_EDIT] },
   { id: 'verify', label: '新人验证', perms: [PERM.VERIFY_EDIT] },
@@ -107,6 +109,7 @@ export default function GroupDetailPage() {
         </div>
       )}
 
+      {tab === 'engagement' && <EngagementOverview groupId={group.id} />}
       {tab === 'welcome' && <WelcomeEditor group={group} reload={reload} />}
       {tab === 'buttons' && <ButtonEditor group={group} reload={reload} />}
       {tab === 'verify' && <VerificationEditor group={group} reload={reload} />}

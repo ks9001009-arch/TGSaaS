@@ -17,7 +17,7 @@ export default function GroupsPage() {
       <div>
         <h1 className="text-2xl font-semibold">我的群组</h1>
         <p className="text-sm text-tg-muted">
-          把机器人添加到群组并设为管理员后，群组会自动出现在这里。每个群拥有独立配置。
+          把机器人添加到群组并设为管理员后，群组会自动出现在这里。进入群组可查看互动总览、欢迎/验证等配置。
         </p>
       </div>
 
