@@ -167,43 +167,52 @@ export class AuthService {
       const ips = entries.map((e) => e.ip);
 
       if (ips.length === 0) {
-        if (ip === 'unknown') {
+        // No silent AUTO_PIN: empty allowlist rejects login unless the current IP
+        // appears in SUPERADMIN_BOOTSTRAP_IPS (one-time bootstrap for new servers).
+        const bootstrap = (process.env.SUPERADMIN_BOOTSTRAP_IPS || '')
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean);
+        if (ip !== 'unknown' && bootstrap.length > 0 && ipMatchesAllowlist(ip, bootstrap)) {
+          await this.prisma.adminIpAllowlist.create({
+            data: { adminId: admin.id, ip, label: '环境变量引导写入' },
+          });
           await this.audit({
             adminEmail: admin.email,
             adminId: admin.id,
             ip,
             userAgent: ua,
-            success: false,
-            reason: 'IP_BLOCKED',
+            success: true,
+            reason: 'BOOTSTRAP_PIN',
           });
           this.alerts.notify({
             tenantId: admin.tenantId,
-            reason: 'IP_BLOCKED',
-            title: '超管登录被拒（无法识别 IP）',
-            detail: `${admin.email} 白名单为空且客户端 IP 未知`,
+            reason: 'BOOTSTRAP_PIN',
+            title: '超管 IP 已通过引导变量锁定',
+            detail: `${admin.email} 白名单为空，已按 SUPERADMIN_BOOTSTRAP_IPS 写入当前 IP`,
             ip,
           });
-          throw new ForbiddenException('无法识别登录 IP，已拒绝超管登录');
+          return { token: this.sign(admin), user: this.publicUser(admin) };
         }
-        await this.prisma.adminIpAllowlist.create({
-          data: { adminId: admin.id, ip, label: '首次登录自动锁定' },
-        });
+
         await this.audit({
           adminEmail: admin.email,
           adminId: admin.id,
           ip,
           userAgent: ua,
-          success: true,
-          reason: 'AUTO_PIN',
+          success: false,
+          reason: 'IP_ALLOWLIST_EMPTY',
         });
         this.alerts.notify({
           tenantId: admin.tenantId,
-          reason: 'AUTO_PIN',
-          title: '超管 IP 已自动锁定',
-          detail: `${admin.email} 首次成功登录，已将 IP 写入白名单`,
+          reason: 'IP_BLOCKED',
+          title: '超管登录被拒（IP 白名单为空）',
+          detail: `${admin.email} 尚未配置 IP 白名单。请设置 SUPERADMIN_BOOTSTRAP_IPS 或写入 admin_ip_allowlist 后重试`,
           ip,
         });
-        return { token: this.sign(admin), user: this.publicUser(admin) };
+        throw new ForbiddenException(
+          '超管尚未配置 IP 白名单，已拒绝登录。请在服务器设置 SUPERADMIN_BOOTSTRAP_IPS=你的公网IP 后重试一次，或手动写入白名单',
+        );
       }
 
       if (!ipMatchesAllowlist(ip, ips)) {

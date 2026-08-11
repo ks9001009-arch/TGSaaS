@@ -1,4 +1,5 @@
 import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
+import { resolveListenerToken } from '../common/listener-token.util';
 
 // Thin HTTP client to the standalone Python (Telethon) listener service.
 // The listener owns the MTProto clients/sessions; NestJS only orchestrates it.
@@ -7,7 +8,7 @@ import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common'
 export class ListenerGatewayService {
   private readonly logger = new Logger('ListenerGateway');
   private readonly base = (process.env.LISTENER_URL || 'http://listener:8100').replace(/\/$/, '');
-  private readonly token = process.env.LISTENER_TOKEN || '';
+  private readonly token = resolveListenerToken();
 
   private async call<T = any>(path: string, body?: any): Promise<T> {
     let res: Response;

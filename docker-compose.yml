@@ -102,6 +102,7 @@ services:
       redis:
         condition: service_healthy
     environment:
+      NODE_ENV: ${NODE_ENV}
       DATABASE_URL: ${DATABASE_URL}
       REDIS_URL: ${REDIS_URL}
       LISTENER_PORT: ${LISTENER_PORT:-8100}

@@ -3,11 +3,13 @@ import { ValidationPipe, Logger } from '@nestjs/common';
 import { AppModule } from './app.module';
 import { resolveJwtSecret } from './auth/jwt-secret.util';
 import { resolveEncryptionKey } from './common/encryption-key.util';
+import { resolveListenerToken } from './common/listener-token.util';
 
 async function bootstrap() {
   // Fail fast if production secrets are missing/weak.
   resolveJwtSecret();
   resolveEncryptionKey();
+  resolveListenerToken();
 
   const app = await NestFactory.create(AppModule);
   // Trust a single reverse-proxy hop (nginx) so req.ip reflects X-Real-IP / XFF correctly.

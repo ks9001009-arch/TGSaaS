@@ -252,18 +252,47 @@ export class ListenerService {
     const ctx = await this.rbac.context(userId);
     const where: any = { tenantId: ctx.tenantId };
     if (!ctx.isSuper) {
-      where.OR = [{ accountId: null }, { accountId: { in: ctx.listenerIds } }];
+      // Sub-admins only see rules bound to their accounts (not tenant-wide).
+      where.accountId = { in: ctx.listenerIds };
+      where.scope = { in: ['ACCOUNT', 'GROUP'] };
     }
     return this.prisma.listenerKeywordRule.findMany({ where, orderBy: { createdAt: 'desc' } });
   }
 
-  private validateRuleScope(ctx: AccessContext, scope: string, accountId?: string) {
+  private validateRuleScope(ctx: AccessContext, scope: string, accountId?: string | null) {
+    if (scope === 'TENANT' && !ctx.isSuper) {
+      throw new ForbiddenException('仅超级管理员可配置租户级规则');
+    }
     if ((scope === 'ACCOUNT' || scope === 'GROUP') && accountId) {
       if (!ctx.isSuper && !ctx.listenerIds.includes(accountId)) {
         throw new ForbiddenException('没有该监听账号的操作权限');
       }
     }
     if (scope === 'ACCOUNT' && !accountId) throw new BadRequestException('按账号配置需指定监听账号');
+    if (scope === 'GROUP' && !accountId) {
+      throw new BadRequestException('按群组配置需指定监听账号');
+    }
+  }
+
+  /** Existing rule must be visible/mutable by the caller (prevents same-tenant IDOR). */
+  private assertRuleAccess(ctx: AccessContext, rule: { scope: string; accountId: string | null }) {
+    if (ctx.isSuper) return;
+    if (rule.scope === 'TENANT' || !rule.accountId) {
+      throw new ForbiddenException('没有该规则的操作权限');
+    }
+    if (!ctx.listenerIds.includes(rule.accountId)) {
+      throw new ForbiddenException('没有该规则的操作权限');
+    }
+  }
+
+  private assertTenantListenerAdmin(ctx: AccessContext, perm: string) {
+    if (!this.rbac.has(ctx, perm)) {
+      throw new ForbiddenException('没有相应权限');
+    }
+    // Tenant-wide push destinations / bot whitelist are shared blast radius — super only.
+    if (!ctx.isSuper) {
+      throw new ForbiddenException('仅超级管理员可管理租户级监听配置');
+    }
   }
 
   async createRule(userId: string, dto: CreateRuleDto) {
@@ -297,6 +326,7 @@ export class ListenerService {
       where: { id, tenantId: ctx.tenantId },
     });
     if (!rule) throw new NotFoundException('规则不存在');
+    this.assertRuleAccess(ctx, rule);
     const scope = dto.scope ?? rule.scope;
     const accountId = dto.accountId !== undefined ? dto.accountId : rule.accountId ?? undefined;
     this.validateRuleScope(ctx, scope, accountId || undefined);
@@ -326,6 +356,7 @@ export class ListenerService {
       where: { id, tenantId: ctx.tenantId },
     });
     if (!rule) throw new NotFoundException('规则不存在');
+    this.assertRuleAccess(ctx, rule);
     await this.prisma.listenerKeywordRule.delete({ where: { id } });
     await this.gateway.reload();
     return { ok: true };
@@ -335,6 +366,7 @@ export class ListenerService {
 
   async listTargets(userId: string) {
     const ctx = await this.rbac.context(userId);
+    this.assertTenantListenerAdmin(ctx, PERMISSIONS.LISTENER_PUSH);
     return this.prisma.listenerPushTarget.findMany({
       where: { tenantId: ctx.tenantId },
       orderBy: { createdAt: 'desc' },
@@ -343,9 +375,7 @@ export class ListenerService {
 
   async createTarget(userId: string, dto: CreateTargetDto) {
     const ctx = await this.rbac.context(userId);
-    if (!this.rbac.has(ctx, PERMISSIONS.LISTENER_PUSH)) {
-      throw new ForbiddenException('没有管理推送目标的权限');
-    }
+    this.assertTenantListenerAdmin(ctx, PERMISSIONS.LISTENER_PUSH);
     const target = await this.prisma.listenerPushTarget.create({
       data: {
         tenantId: ctx.tenantId,
@@ -362,9 +392,7 @@ export class ListenerService {
 
   async updateTarget(userId: string, id: string, dto: UpdateTargetDto) {
     const ctx = await this.rbac.context(userId);
-    if (!this.rbac.has(ctx, PERMISSIONS.LISTENER_PUSH)) {
-      throw new ForbiddenException('没有管理推送目标的权限');
-    }
+    this.assertTenantListenerAdmin(ctx, PERMISSIONS.LISTENER_PUSH);
     const t = await this.prisma.listenerPushTarget.findFirst({ where: { id, tenantId: ctx.tenantId } });
     if (!t) throw new NotFoundException('推送目标不存在');
     const updated = await this.prisma.listenerPushTarget.update({
@@ -383,9 +411,7 @@ export class ListenerService {
 
   async removeTarget(userId: string, id: string) {
     const ctx = await this.rbac.context(userId);
-    if (!this.rbac.has(ctx, PERMISSIONS.LISTENER_PUSH)) {
-      throw new ForbiddenException('没有管理推送目标的权限');
-    }
+    this.assertTenantListenerAdmin(ctx, PERMISSIONS.LISTENER_PUSH);
     const t = await this.prisma.listenerPushTarget.findFirst({ where: { id, tenantId: ctx.tenantId } });
     if (!t) throw new NotFoundException('推送目标不存在');
     await this.prisma.listenerPushTarget.delete({ where: { id } });
@@ -397,6 +423,7 @@ export class ListenerService {
 
   async listBotWhitelist(userId: string) {
     const ctx = await this.rbac.context(userId);
+    this.assertTenantListenerAdmin(ctx, PERMISSIONS.LISTENER_RULE);
     return this.prisma.listenerBotWhitelist.findMany({
       where: { tenantId: ctx.tenantId },
       orderBy: { createdAt: 'desc' },
@@ -410,9 +437,7 @@ export class ListenerService {
 
   async createBotWhitelist(userId: string, dto: CreateBotWhitelistDto) {
     const ctx = await this.rbac.context(userId);
-    if (!this.rbac.has(ctx, PERMISSIONS.LISTENER_RULE)) {
-      throw new ForbiddenException('没有管理监控机器人名单的权限');
-    }
+    this.assertTenantListenerAdmin(ctx, PERMISSIONS.LISTENER_RULE);
     const username = this.cleanUsername(dto.username);
     const uid = (dto.userId || '').trim() || null;
     if (!username && !uid) throw new BadRequestException('请至少填写 @用户名 或 用户ID');
@@ -431,9 +456,7 @@ export class ListenerService {
 
   async updateBotWhitelist(userId: string, id: string, dto: UpdateBotWhitelistDto) {
     const ctx = await this.rbac.context(userId);
-    if (!this.rbac.has(ctx, PERMISSIONS.LISTENER_RULE)) {
-      throw new ForbiddenException('没有管理监控机器人名单的权限');
-    }
+    this.assertTenantListenerAdmin(ctx, PERMISSIONS.LISTENER_RULE);
     const row = await this.prisma.listenerBotWhitelist.findFirst({ where: { id, tenantId: ctx.tenantId } });
     if (!row) throw new NotFoundException('名单项不存在');
     const updated = await this.prisma.listenerBotWhitelist.update({
@@ -451,9 +474,7 @@ export class ListenerService {
 
   async removeBotWhitelist(userId: string, id: string) {
     const ctx = await this.rbac.context(userId);
-    if (!this.rbac.has(ctx, PERMISSIONS.LISTENER_RULE)) {
-      throw new ForbiddenException('没有管理监控机器人名单的权限');
-    }
+    this.assertTenantListenerAdmin(ctx, PERMISSIONS.LISTENER_RULE);
     const row = await this.prisma.listenerBotWhitelist.findFirst({ where: { id, tenantId: ctx.tenantId } });
     if (!row) throw new NotFoundException('名单项不存在');
     await this.prisma.listenerBotWhitelist.delete({ where: { id } });
@@ -466,8 +487,14 @@ export class ListenerService {
   async listHits(userId: string, limit = 100, accountId?: string) {
     const ctx = await this.rbac.context(userId);
     const where: any = { tenantId: ctx.tenantId };
-    if (!ctx.isSuper) where.accountId = { in: ctx.listenerIds };
-    if (accountId) where.accountId = accountId;
+    if (accountId) {
+      if (!ctx.isSuper && !ctx.listenerIds.includes(accountId)) {
+        throw new ForbiddenException('没有该监听账号的操作权限');
+      }
+      where.accountId = accountId;
+    } else if (!ctx.isSuper) {
+      where.accountId = { in: ctx.listenerIds };
+    }
     const hits = await this.prisma.listenerHit.findMany({
       where,
       orderBy: { createdAt: 'desc' },
@@ -478,8 +505,12 @@ export class ListenerService {
 
   async listPushLogs(userId: string, limit = 100) {
     const ctx = await this.rbac.context(userId);
+    const where: any = { tenantId: ctx.tenantId };
+    if (!ctx.isSuper) {
+      where.accountId = { in: ctx.listenerIds };
+    }
     return this.prisma.listenerPushLog.findMany({
-      where: { tenantId: ctx.tenantId },
+      where,
       orderBy: { createdAt: 'desc' },
       take: Math.min(limit, 500),
     });
@@ -489,6 +520,8 @@ export class ListenerService {
     const ctx = await this.rbac.context(userId);
     const accWhere: any = { tenantId: ctx.tenantId };
     if (!ctx.isSuper) accWhere.id = { in: ctx.listenerIds };
+    const pushWhere: any = { tenantId: ctx.tenantId };
+    if (!ctx.isSuper) pushWhere.accountId = { in: ctx.listenerIds };
 
     const [accounts, online, listeningGroups, hits, pushed, failed] = await Promise.all([
       this.prisma.listenerAccount.count({ where: accWhere }),
@@ -499,8 +532,8 @@ export class ListenerService {
       this.prisma.listenerHit.count({
         where: { tenantId: ctx.tenantId, ...(ctx.isSuper ? {} : { accountId: { in: ctx.listenerIds } }) },
       }),
-      this.prisma.listenerPushLog.count({ where: { tenantId: ctx.tenantId, status: 'SENT' } }),
-      this.prisma.listenerPushLog.count({ where: { tenantId: ctx.tenantId, status: 'FAILED' } }),
+      this.prisma.listenerPushLog.count({ where: { ...pushWhere, status: 'SENT' } }),
+      this.prisma.listenerPushLog.count({ where: { ...pushWhere, status: 'FAILED' } }),
     ]);
 
     return { accounts, online, listeningGroups, hits, pushed, failed };
