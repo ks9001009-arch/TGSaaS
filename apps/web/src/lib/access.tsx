@@ -1,7 +1,7 @@
 'use client';
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState, ReactNode } from 'react';
-import { api, hasSession } from './api';
+import { api } from './api';
 
 const BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost/api';
 
@@ -66,7 +66,6 @@ export function AccessProvider({ children }: { children: ReactNode }) {
   // Live permission sync via SSE. Cookie session → short-lived ticket (never put
   // the dashboard JWT in query strings / access logs).
   useEffect(() => {
-    if (!hasSession()) return;
     let closed = false;
     let es: EventSource | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
