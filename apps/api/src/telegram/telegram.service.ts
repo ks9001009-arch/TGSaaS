@@ -26,6 +26,7 @@ import {
 import { recordGroupMessageActivity } from './message-activity';
 import { isCountableGroupUserMessage } from './message-activity.util';
 import { decryptBotToken } from '../common/crypto.util';
+import { UsersService } from '../users/users.service';
 
 @Injectable()
 export class TelegramService {
@@ -41,6 +42,7 @@ export class TelegramService {
     private readonly profile: ProfileService,
     private readonly leaderboard: LeaderboardService,
     private readonly lottery: LotteryService,
+    private readonly users: UsersService,
   ) {}
 
   // ---------- per-user locale (private chat) ----------
@@ -70,12 +72,14 @@ export class TelegramService {
     const privateZh = [
       { command: 'start', description: '开始' },
       { command: 'help', description: '帮助' },
+      { command: 'bind', description: '绑定后台账号' },
       { command: 'id', description: '查看ID' },
       { command: 'getid', description: '查询用户ID' },
     ];
     const privateEn = [
       { command: 'start', description: 'Start' },
       { command: 'help', description: 'Help' },
+      { command: 'bind', description: 'Bind dashboard account' },
       { command: 'id', description: 'Show ID' },
       { command: 'getid', description: 'Look up user ID' },
     ];
@@ -274,6 +278,7 @@ export class TelegramService {
   private registerHandlers(bot: Bot, botId: string) {
     bot.command('start', (ctx) => this.onStart(ctx, botId));
     bot.command('help', (ctx) => this.onHelp(ctx, botId));
+    bot.command('bind', (ctx) => this.onBind(ctx, botId));
     bot.command('id', (ctx) => this.onId(ctx, botId));
     bot.command('getid', (ctx) => this.onGetId(ctx, botId));
     // Group menu Latin commands (setMyCommands cannot use Chinese command names).
@@ -347,11 +352,57 @@ export class TelegramService {
       await this.handleTemplateButtonStart(ctx, botId, payload);
       return;
     }
+    if (payload.toLowerCase().startsWith('bind_') || /^[a-f0-9]{8}$/i.test(payload)) {
+      const code = payload.replace(/^bind_/i, '');
+      await this.completeBindFromChat(ctx, code);
+      return;
+    }
     const locale = await this.getUserLocale(botId, ctx.from?.id);
     const record = await this.prisma.bot.findUnique({ where: { id: botId } });
     const text = record?.welcomeHomeText || t(locale, 'home_title');
     const kb = await this.appendAdsToKeyboard(this.buildHomeMenu(locale), botId, null, 'PRIVATE_MENU');
     await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: kb });
+  }
+
+  private async onBind(ctx: Context, _botId: string) {
+    if (ctx.chat?.type !== 'private') {
+      await ctx.reply('请在与机器人的私聊中使用 /bind');
+      return;
+    }
+    const text = (ctx.message as any)?.text || '';
+    const parts = text.trim().split(/\s+/);
+    const code = parts[1] || '';
+    if (!code) {
+      await ctx.reply('用法：先在管理后台「我的账户」获取绑定码，再发送 `/bind 你的绑定码`', {
+        parse_mode: 'Markdown',
+      });
+      return;
+    }
+    await this.completeBindFromChat(ctx, code);
+  }
+
+  private async completeBindFromChat(ctx: Context, code: string) {
+    const from = ctx.from;
+    if (!from?.id) {
+      await ctx.reply('无法识别你的 Telegram 账号');
+      return;
+    }
+    try {
+      await this.users.completeTelegramBind(code, String(from.id), from.username || null);
+      await ctx.reply(`✅ 绑定成功\nTelegram ID: \`${from.id}\`\n现在可以在私聊菜单使用「我的群组」。`, {
+        parse_mode: 'Markdown',
+      });
+    } catch (e: any) {
+      let msg = '绑定失败';
+      if (typeof e?.getResponse === 'function') {
+        const r = e.getResponse();
+        if (typeof r === 'string') msg = r;
+        else if (r?.message) msg = Array.isArray(r.message) ? r.message.join(', ') : r.message;
+      } else if (e?.message) {
+        msg = e.message;
+      }
+      await ctx.reply(`❌ ${msg}`);
+    }
   }
 
   private async onHelp(ctx: Context, botId: string) {

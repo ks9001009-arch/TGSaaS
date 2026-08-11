@@ -1,7 +1,7 @@
 'use client';
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState, ReactNode } from 'react';
-import { api, getToken } from './api';
+import { api, hasSession } from './api';
 
 const BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost/api';
 
@@ -43,10 +43,6 @@ export function AccessProvider({ children }: { children: ReactNode }) {
   const esRef = useRef<EventSource | null>(null);
 
   const refresh = useCallback(async () => {
-    if (!getToken()) {
-      setLoading(false);
-      return;
-    }
     try {
       const [access, meta] = await Promise.all([
         api.get<{ isSuper: boolean; bots: BotAccess[]; permissions: string[] }>('/admins/me/access'),
@@ -57,7 +53,7 @@ export function AccessProvider({ children }: { children: ReactNode }) {
       setPerms(access.permissions || []);
       setGroups(meta.groups || []);
     } catch {
-      // ignore
+      // ignore (e.g. not logged in yet)
     } finally {
       setLoading(false);
     }
@@ -67,10 +63,10 @@ export function AccessProvider({ children }: { children: ReactNode }) {
     refresh();
   }, [refresh]);
 
-  // Live permission sync via SSE. Exchange Bearer JWT for a 2-minute ticket first
-  // so the long-lived session token never appears in query strings / access logs.
+  // Live permission sync via SSE. Cookie session → short-lived ticket (never put
+  // the dashboard JWT in query strings / access logs).
   useEffect(() => {
-    if (!getToken()) return;
+    if (!hasSession()) return;
     let closed = false;
     let es: EventSource | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Patch, UseGuards } from '@nestjs/common';
+import { Controller, Delete, Get, Patch, Post, Body, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser, AuthUser } from '../common/current-user.decorator';
 import { UsersService } from './users.service';
@@ -18,8 +18,15 @@ export class UsersController {
     return this.users.updateLocale(u.userId, locale || 'zh');
   }
 
-  @Patch('telegram')
-  bindTelegram(@CurrentUser() u: AuthUser, @Body('telegramUserId') telegramUserId: string) {
-    return this.users.bindTelegram(u.userId, telegramUserId || null);
+  /** Start proof-of-ownership bind: returns a short-lived code for /bind in the bot. */
+  @Post('telegram/bind-request')
+  requestBind(@CurrentUser() u: AuthUser) {
+    return this.users.requestTelegramBind(u.userId);
+  }
+
+  /** Clear Telegram binding (no free-form ID assignment — use bind-request + bot). */
+  @Delete('telegram')
+  unbindTelegram(@CurrentUser() u: AuthUser) {
+    return this.users.unbindTelegram(u.userId);
   }
 }

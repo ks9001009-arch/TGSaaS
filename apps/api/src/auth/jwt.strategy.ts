@@ -3,6 +3,7 @@ import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { resolveJwtSecret } from './jwt-secret.util';
 import { PrismaService } from '../prisma/prisma.service';
+import { readAuthCookie } from './auth-cookie.util';
 
 export interface JwtPayload {
   sub: string; // Admin.id
@@ -15,7 +16,10 @@ export interface JwtPayload {
 export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor(private readonly prisma: PrismaService) {
     super({
-      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+      jwtFromRequest: ExtractJwt.fromExtractors([
+        (req) => readAuthCookie(req as any),
+        ExtractJwt.fromAuthHeaderAsBearerToken(),
+      ]),
       ignoreExpiration: false,
       secretOrKey: resolveJwtSecret(),
     });

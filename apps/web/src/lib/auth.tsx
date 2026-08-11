@@ -1,7 +1,7 @@
 'use client';
 
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { api, setToken, clearToken, getToken } from './api';
+import { api, markSession, clearSession } from './api';
 
 export interface User {
   id: string;
@@ -29,15 +29,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   async function refresh() {
-    if (!getToken()) {
-      setUser(null);
-      setLoading(false);
-      return;
-    }
     try {
       const me = await api.get<User>('/auth/me');
+      markSession();
       setUser(me);
     } catch {
+      clearSession();
       setUser(null);
     } finally {
       setLoading(false);
@@ -45,28 +42,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   useEffect(() => {
+    // Always probe cookie session (HttpOnly JWT not readable from JS).
     refresh();
   }, []);
 
   async function login(email: string, password: string) {
-    const res = await api.post<{ token: string; user: User }>('/auth/login', { email, password });
-    setToken(res.token);
+    const res = await api.post<{ user: User }>('/auth/login', { email, password });
+    markSession();
     setUser(res.user);
   }
 
   async function register(email: string, password: string, displayName?: string, inviteCode?: string) {
-    const res = await api.post<{ token: string; user: User }>('/auth/register', {
+    const res = await api.post<{ user: User }>('/auth/register', {
       email,
       password,
       displayName,
       inviteCode,
     });
-    setToken(res.token);
+    markSession();
     setUser(res.user);
   }
 
-  function logout() {
-    clearToken();
+  async function logout() {
+    try {
+      await api.post('/auth/logout');
+    } catch {
+      // still clear local marker
+    }
+    clearSession();
     setUser(null);
     window.location.href = '/login';
   }

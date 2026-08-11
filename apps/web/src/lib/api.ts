@@ -1,31 +1,55 @@
 const BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost/api';
 
-const TOKEN_KEY = 'tg_saas_token';
+/** Client-side session marker only (JWT lives in HttpOnly cookie). */
+const SESSION_KEY = 'tg_saas_authed';
 
-export function getToken(): string | null {
-  if (typeof window === 'undefined') return null;
-  return window.localStorage.getItem(TOKEN_KEY);
+export function hasSession(): boolean {
+  if (typeof window === 'undefined') return false;
+  return window.sessionStorage.getItem(SESSION_KEY) === '1';
 }
 
-export function setToken(token: string) {
-  window.localStorage.setItem(TOKEN_KEY, token);
+export function markSession() {
+  if (typeof window !== 'undefined') {
+    window.sessionStorage.setItem(SESSION_KEY, '1');
+  }
+}
+
+export function clearSession() {
+  if (typeof window !== 'undefined') {
+    window.sessionStorage.removeItem(SESSION_KEY);
+    // Migrate away from legacy localStorage JWT if present.
+    window.localStorage.removeItem('tg_saas_token');
+  }
+}
+
+/** @deprecated Use hasSession(); kept for call-site compatibility during migration. */
+export function getToken(): string | null {
+  return hasSession() ? 'cookie' : null;
+}
+
+export function setToken(_token?: string) {
+  markSession();
 }
 
 export function clearToken() {
-  window.localStorage.removeItem(TOKEN_KEY);
+  clearSession();
 }
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const token = getToken();
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
     ...(options.headers as Record<string, string>),
   };
-  if (token) headers['Authorization'] = `Bearer ${token}`;
+  if (options.body != null && !headers['Content-Type']) {
+    headers['Content-Type'] = 'application/json';
+  }
 
-  const res = await fetch(`${BASE}${path}`, { ...options, headers });
+  const res = await fetch(`${BASE}${path}`, {
+    ...options,
+    headers,
+    credentials: 'include',
+  });
   if (res.status === 401) {
-    clearToken();
+    clearSession();
     if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
       window.location.href = '/login';
     }
