@@ -17,7 +17,12 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
-RUN mkdir -p /sessions
+RUN mkdir -p /sessions \
+    && useradd --create-home --uid 10001 --shell /usr/sbin/nologin listener \
+    && chown -R listener:listener /app /sessions
+
+USER listener
 
 EXPOSE 8100
+# Bind all interfaces inside the container network only; do not publish 8100 on the host.
 CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${LISTENER_PORT:-8100}"]

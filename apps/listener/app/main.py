@@ -1,3 +1,4 @@
+import hmac
 import logging
 
 from fastapi import Body, FastAPI, Header, HTTPException
@@ -16,7 +17,7 @@ app = FastAPI(title="Telegram Listener Service")
 def _auth(token: str | None) -> None:
     if not LISTENER_TOKEN:
         raise HTTPException(status_code=503, detail="listener token not configured")
-    if token != LISTENER_TOKEN:
+    if not token or not hmac.compare_digest(token, LISTENER_TOKEN):
         raise HTTPException(status_code=401, detail="invalid listener token")
 
 

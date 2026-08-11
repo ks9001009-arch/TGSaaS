@@ -1,4 +1,4 @@
-import { Injectable, ConflictException } from '@nestjs/common';
+import { Injectable, BadRequestException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
@@ -35,9 +35,14 @@ export class UsersService {
 
   // Bind (or clear) the Telegram user id so the bot can recognize this account
   // when the admin taps "我的群组" in the bot's private chat.
+  // Only numeric Telegram user IDs are accepted (reduces spoofing via @handles).
+  // Full proof-of-ownership (bot deep-link challenge) is recommended as a follow-up.
   async bindTelegram(adminId: string, telegramUserId: string | null) {
     const value = telegramUserId ? String(telegramUserId).trim().replace(/^@/, '') : null;
     if (value) {
+      if (!/^\d{5,20}$/.test(value)) {
+        throw new BadRequestException('Telegram 用户 ID 必须是数字（可在机器人私聊中用 /id 查看）');
+      }
       const existing = await this.prisma.admin.findUnique({ where: { telegramUserId: value } });
       if (existing && existing.id !== adminId) {
         throw new ConflictException('该 Telegram 账号已绑定到其他后台账号');

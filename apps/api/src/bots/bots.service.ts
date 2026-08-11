@@ -5,6 +5,7 @@ import { BotManagerService } from '../telegram/bot-manager.service';
 import { RbacService } from '../rbac/rbac.service';
 import { PERMISSIONS } from '../rbac/permissions';
 import { CreateBotDto, UpdateBotHomeDto, ChangeTokenDto } from './dto';
+import { encryptBotToken } from '../common/crypto.util';
 
 @Injectable()
 export class BotsService {
@@ -65,7 +66,7 @@ export class BotsService {
       data: {
         tenantId: ctx.tenantId,
         ownerAdminId: ctx.adminId,
-        token: dto.token,
+        token: encryptBotToken(dto.token),
         name: dto.name || identity.name,
         telegramBotId: identity.id,
         username: identity.username,
@@ -119,7 +120,11 @@ export class BotsService {
     }
     await this.prisma.bot.update({
       where: { id },
-      data: { token: dto.token, username: identity.username, telegramBotId: identity.id },
+      data: {
+        token: encryptBotToken(dto.token),
+        username: identity.username,
+        telegramBotId: identity.id,
+      },
     });
     await this.manager.restartBot(id);
     const updated = await this.prisma.bot.findUnique({ where: { id } });

@@ -329,8 +329,10 @@ class ListenerManager:
                 break
         if matched_kw is None and rule.get("regex"):
             try:
-                if re.search(rule["regex"], text):
-                    matched_kw = rule["regex"]
+                pattern = rule["regex"] or ""
+                # Cap length to reduce ReDoS from user-supplied patterns.
+                if 0 < len(pattern) <= 200 and re.search(pattern, text):
+                    matched_kw = pattern
             except re.error:
                 pass
         if matched_kw is None:

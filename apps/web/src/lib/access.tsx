@@ -67,25 +67,47 @@ export function AccessProvider({ children }: { children: ReactNode }) {
     refresh();
   }, [refresh]);
 
-  // Live permission sync via SSE: re-fetch access whenever the server says so.
+  // Live permission sync via SSE. Exchange Bearer JWT for a 2-minute ticket first
+  // so the long-lived session token never appears in query strings / access logs.
   useEffect(() => {
-    const token = getToken();
-    if (!token) return;
-    const es = new EventSource(`${BASE}/events?token=${encodeURIComponent(token)}`);
-    esRef.current = es;
-    es.onmessage = (ev) => {
+    if (!getToken()) return;
+    let closed = false;
+    let es: EventSource | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const connect = async () => {
       try {
-        const payload = JSON.parse(ev.data);
-        if (payload?.type === 'permissions') refresh();
+        const { token } = await api.post<{ token: string }>('/events/ticket');
+        if (closed || !token) return;
+        es = new EventSource(`${BASE}/events?token=${encodeURIComponent(token)}`);
+        esRef.current = es;
+        es.onmessage = (ev) => {
+          try {
+            const payload = JSON.parse(ev.data);
+            if (payload?.type === 'permissions') refresh();
+          } catch {
+            // ignore pings / non-json
+          }
+        };
+        es.onerror = () => {
+          es?.close();
+          es = null;
+          esRef.current = null;
+          // ticket expires ~2m; reconnect with a fresh ticket
+          if (!closed) {
+            reconnectTimer = setTimeout(connect, 1500);
+          }
+        };
       } catch {
-        // ignore pings / non-json
+        if (!closed) reconnectTimer = setTimeout(connect, 5000);
       }
     };
-    es.onerror = () => {
-      // browser auto-reconnects; nothing to do
-    };
+
+    connect();
     return () => {
-      es.close();
+      closed = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      es?.close();
       esRef.current = null;
     };
   }, [refresh]);

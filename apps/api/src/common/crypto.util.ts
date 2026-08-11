@@ -1,19 +1,15 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'crypto';
+import { resolveEncryptionKey } from './encryption-key.util';
 
-// AES-256-GCM symmetric encryption for secrets at rest (e.g. the Telegram API
-// Hash). The Python listener service decrypts these with the same algorithm and
-// the same ENCRYPTION_KEY, so the wire format MUST stay stable:
+// AES-256-GCM symmetric encryption for secrets at rest (Telegram API Hash, bot tokens).
+// The Python listener decrypts these with the same algorithm and ENCRYPTION_KEY.
 //
 //   v1:<base64(iv, 12 bytes)>:<base64(ciphertext || authTag, 16 bytes)>
 //
-// Key = sha256(ENCRYPTION_KEY || JWT_SECRET || fallback) => 32 bytes.
+// Key = sha256(ENCRYPTION_KEY) => 32 bytes.
 
 function key(): Buffer {
-  const secret =
-    process.env.ENCRYPTION_KEY ||
-    process.env.JWT_SECRET ||
-    'tg_saas_default_encryption_key_change_me';
-  return createHash('sha256').update(secret, 'utf8').digest();
+  return createHash('sha256').update(resolveEncryptionKey(), 'utf8').digest();
 }
 
 export function encryptSecret(plain: string): string {
@@ -28,7 +24,7 @@ export function decryptSecret(enc: string): string {
   if (!enc) return '';
   const parts = enc.split(':');
   if (parts.length !== 3 || parts[0] !== 'v1') {
-    // not encrypted (legacy/plain) — return as-is
+    // not encrypted (legacy/plain) — return as-is for migration compatibility
     return enc;
   }
   const iv = Buffer.from(parts[1], 'base64');
@@ -38,6 +34,25 @@ export function decryptSecret(enc: string): string {
   const decipher = createDecipheriv('aes-256-gcm', key(), iv);
   decipher.setAuthTag(tag);
   return Buffer.concat([decipher.update(ct), decipher.final()]).toString('utf8');
+}
+
+/** True when value already uses the v1 wire format. */
+export function isEncryptedSecret(enc: string): boolean {
+  if (!enc) return false;
+  const parts = enc.split(':');
+  return parts.length === 3 && parts[0] === 'v1';
+}
+
+/** Encrypt plaintext bot tokens; leave already-encrypted values unchanged. */
+export function encryptBotToken(plainOrEnc: string): string {
+  if (!plainOrEnc) return plainOrEnc;
+  if (isEncryptedSecret(plainOrEnc)) return plainOrEnc;
+  return encryptSecret(plainOrEnc);
+}
+
+/** Decrypt bot token for Telegram API use (supports legacy plaintext). */
+export function decryptBotToken(enc: string): string {
+  return decryptSecret(enc);
 }
 
 // Show only the last `keep` chars; mask the rest. For displaying secrets safely.

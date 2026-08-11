@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { RbacService } from '../rbac/rbac.service';
 import { TelegramService } from '../telegram/telegram.service';
@@ -104,7 +104,23 @@ export class GroupsService {
   // ---------- verification ----------
   async updateVerification(userId: string, groupId: string, data: any) {
     await this.assertAccess(userId, groupId, PERMISSIONS.VERIFY_EDIT);
-    return this.prisma.verificationConfig.update({ where: { groupId }, data });
+    const allowed = [
+      'enabled',
+      'mode',
+      'timeoutSeconds',
+      'maxAttempts',
+      'onFail',
+      'question',
+      'answer',
+      'promptText',
+      'successText',
+      'failText',
+    ] as const;
+    const patch: Record<string, unknown> = {};
+    for (const k of allowed) {
+      if (data?.[k] !== undefined) patch[k] = data[k];
+    }
+    return this.prisma.verificationConfig.update({ where: { groupId }, data: patch });
   }
 
   // ---------- channel-follow gate (独立于验证) ----------
@@ -157,7 +173,26 @@ export class GroupsService {
 
     for (const perm of needed) this.rbac.assertGroup(ctx, groupId, perm);
 
-    return this.prisma.filterConfig.update({ where: { groupId }, data });
+    const allowed = [
+      'antiAd',
+      'antiSpam',
+      'mediaFilter',
+      'linkFilter',
+      'antiFlood',
+      'floodMaxMessages',
+      'floodWindowSeconds',
+      'floodAction',
+      'floodMuteSeconds',
+      'floodBanThreshold',
+      'floodOffenseWindowHours',
+      'warnLimit',
+      'warnAction',
+    ] as const;
+    const patch: Record<string, unknown> = {};
+    for (const k of allowed) {
+      if (data?.[k] !== undefined) patch[k] = data[k];
+    }
+    return this.prisma.filterConfig.update({ where: { groupId }, data: patch });
   }
 
   // ---------- rules ----------
@@ -169,11 +204,19 @@ export class GroupsService {
   // ---------- keywords ----------
   async addKeyword(userId: string, groupId: string, data: any) {
     await this.assertAccess(userId, groupId, PERMISSIONS.FILTER_KEYWORDS);
+    const pattern = String(data.pattern || '').trim();
+    if (!pattern || pattern.length > 200) {
+      throw new BadRequestException('关键词长度需在 1–200 之间');
+    }
+    const match = data.match || 'CONTAINS';
+    if (!['CONTAINS', 'EXACT', 'REGEX'].includes(match)) {
+      throw new BadRequestException('无效的匹配模式');
+    }
     return this.prisma.keyword.create({
       data: {
         groupId,
-        pattern: data.pattern,
-        match: data.match || 'CONTAINS',
+        pattern,
+        match,
         action: data.action || 'DELETE',
         enabled: data.enabled ?? true,
       },

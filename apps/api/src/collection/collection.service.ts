@@ -12,6 +12,7 @@ import {
   Platform,
 } from './parser.util';
 import { SetGroupConfigDto, ListSubmissionsQuery } from './dto';
+import { decryptBotToken } from '../common/crypto.util';
 
 @Injectable()
 export class CollectionService {
@@ -210,8 +211,12 @@ export class CollectionService {
     const cached = this.tokenCache.get(botId);
     if (cached) return cached;
     const bot = await this.prisma.bot.findUnique({ where: { id: botId }, select: { token: true } });
-    if (bot?.token) this.tokenCache.set(botId, bot.token);
-    return bot?.token ?? null;
+    if (bot?.token) {
+      const plain = decryptBotToken(bot.token);
+      this.tokenCache.set(botId, plain);
+      return plain;
+    }
+    return null;
   }
 
   invalidateToken(botId: string) {

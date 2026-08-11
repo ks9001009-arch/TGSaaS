@@ -3,6 +3,7 @@ import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { TelegramService } from './telegram.service';
 import { RbacBootstrapService } from '../rbac/rbac-bootstrap.service';
+import { encryptBotToken } from '../common/crypto.util';
 
 const SYSTEM_EMAIL = 'system@platform.local';
 
@@ -37,18 +38,19 @@ export class BotBootstrapService {
       return null;
     }
 
+    const storedToken = encryptBotToken(token);
     const bot = await this.prisma.bot.upsert({
       where: { telegramBotId: identity.id },
       create: {
         tenantId: owner.tenantId,
         ownerAdminId: owner.id,
-        token,
+        token: storedToken,
         name: process.env.BOT_USERNAME?.trim() || identity.name,
         telegramBotId: identity.id,
         username: identity.username,
       },
       update: {
-        token,
+        token: storedToken,
         username: identity.username,
         name: process.env.BOT_USERNAME?.trim() || identity.name,
         isActive: true,

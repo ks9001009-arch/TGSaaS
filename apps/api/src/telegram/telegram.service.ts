@@ -25,6 +25,7 @@ import {
 } from '../engagement/engagement-commands.util';
 import { recordGroupMessageActivity } from './message-activity';
 import { isCountableGroupUserMessage } from './message-activity.util';
+import { decryptBotToken } from '../common/crypto.util';
 
 @Injectable()
 export class TelegramService {
@@ -132,7 +133,7 @@ export class TelegramService {
     const cached = this.instances.get(record.id);
     if (cached) return cached;
 
-    const bot = new Bot(record.token);
+    const bot = new Bot(decryptBotToken(record.token));
     this.installLeaveDetection(bot, record.id);
     this.registerHandlers(bot, record.id);
     await bot.init();

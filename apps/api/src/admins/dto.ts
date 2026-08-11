@@ -10,9 +10,8 @@ export class CreateAdminDto {
   @Matches(/^[A-Za-z0-9_]+$/, { message: '管理员用户名仅支持字母、数字、下划线' })
   email: string;
 
-  // login password: no complexity requirement
   @IsString()
-  @MinLength(1, { message: '请输入登录密码' })
+  @MinLength(8, { message: '登录密码至少需要 8 个字符' })
   password: string;
 
   @IsOptional()
@@ -49,7 +48,7 @@ export class UpdateAdminDto {
 
   @IsOptional()
   @IsString()
-  @MinLength(1)
+  @MinLength(8, { message: '登录密码至少需要 8 个字符' })
   password?: string;
 }
 

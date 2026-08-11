@@ -8,6 +8,7 @@ import {
   PERMISSIONS,
   DEFAULT_SUBADMIN_PERMISSIONS,
   ALL_PERMISSIONS,
+  PLATFORM_PERMISSIONS,
   PERMISSION_GROUPS,
   PermissionKey,
 } from '../rbac/permissions';
@@ -60,6 +61,32 @@ export class AdminsService {
     return ctx;
   }
 
+  /**
+   * Filter permissions a caller is allowed to grant.
+   * - Super: any catalog permission
+   * - Non-super: only permissions they already hold, and never PLATFORM_PERMISSIONS
+   */
+  private filterGrantablePermissions(
+    ctx: Awaited<ReturnType<RbacService['context']>>,
+    requested: string[],
+  ): PermissionKey[] {
+    const platform = new Set<string>(PLATFORM_PERMISSIONS as string[]);
+    const catalog = new Set<string>(ALL_PERMISSIONS as string[]);
+    const cleaned = requested.filter((p) => catalog.has(p)) as PermissionKey[];
+    if (ctx.isSuper) return cleaned;
+
+    const held = ctx.permissions;
+    const deniedPlatform = cleaned.filter((p) => platform.has(p));
+    if (deniedPlatform.length) {
+      throw new ForbiddenException(`无权授予平台级权限: ${deniedPlatform.join(', ')}`);
+    }
+    const deniedHeld = cleaned.filter((p) => !held.has(p));
+    if (deniedHeld.length) {
+      throw new ForbiddenException(`不能授予自己没有的权限: ${deniedHeld.join(', ')}`);
+    }
+    return cleaned;
+  }
+
   async list(userId: string, botId: string) {
     const ctx = await this.assertCanManage(userId, botId);
     const bindings = await this.prisma.adminBot.findMany({
@@ -108,9 +135,10 @@ export class AdminsService {
     const bot = await this.prisma.bot.findFirst({ where: { id: dto.botId, tenantId: ctx.tenantId } });
     if (!bot) throw new NotFoundException('Bot not found');
 
-    const requested = (dto.permissions ?? DEFAULT_SUBADMIN_PERMISSIONS).filter((p) =>
-      (ALL_PERMISSIONS as string[]).includes(p),
-    ) as PermissionKey[];
+    const requested = this.filterGrantablePermissions(
+      ctx,
+      dto.permissions ?? DEFAULT_SUBADMIN_PERMISSIONS,
+    );
 
     // the login account (username) is globally unique; an account from another
     // tenant cannot be reused
@@ -154,8 +182,11 @@ export class AdminsService {
   async updatePermissions(userId: string, id: string, dto: UpdatePermissionsDto) {
     const ctx = await this.assertCanManage(userId);
     const target = await this.assertTargetInScope(ctx.tenantId, id);
+    if (!ctx.isSuper && target.id === ctx.adminId) {
+      throw new ForbiddenException('不能通过权限面板给自己提权');
+    }
 
-    const perms = dto.permissions.filter((p) => (ALL_PERMISSIONS as string[]).includes(p)) as PermissionKey[];
+    const perms = this.filterGrantablePermissions(ctx, dto.permissions ?? []);
     const role = await this.rbacBootstrap.createCustomRole(ctx.tenantId, target.id, perms);
     if (target.roleId !== role.id) {
       await this.prisma.admin.update({ where: { id: target.id }, data: { roleId: role.id } });

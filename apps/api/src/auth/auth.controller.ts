@@ -4,6 +4,7 @@ import { RegisterDto, LoginDto } from './dto';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { CurrentUser, AuthUser } from '../common/current-user.decorator';
 import { PrismaService } from '../prisma/prisma.service';
+import { getClientIp } from '../security/ip.util';
 
 @Controller('auth')
 export class AuthController {
@@ -19,8 +20,7 @@ export class AuthController {
 
   @Post('login')
   login(@Body() dto: LoginDto, @Req() req: any) {
-    const forwarded = (req.headers?.['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim();
-    const ip = forwarded || req.ip || req.socket?.remoteAddress;
+    const ip = getClientIp(req);
     const ua = req.headers?.['user-agent'] as string | undefined;
     return this.auth.login(dto, ip, ua);
   }

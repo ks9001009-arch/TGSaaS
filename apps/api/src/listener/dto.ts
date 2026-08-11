@@ -85,6 +85,7 @@ export class CreateRuleDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(200)
   regex?: string;
 
   @IsOptional()
@@ -122,6 +123,7 @@ export class UpdateRuleDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(200)
   regex?: string;
 
   @IsOptional()

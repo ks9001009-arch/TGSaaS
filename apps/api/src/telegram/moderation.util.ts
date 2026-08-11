@@ -18,6 +18,8 @@ export function matchKeyword(text: string, rule: KeywordRule): boolean {
       return t.trim() === p.trim();
     case 'REGEX':
       try {
+        // Cap pattern length to reduce ReDoS risk from admin-supplied regex.
+        if (!rule.pattern || rule.pattern.length > 200) return false;
         return new RegExp(rule.pattern, 'i').test(text);
       } catch {
         return false;

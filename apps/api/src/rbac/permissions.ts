@@ -80,12 +80,15 @@ export const DEFAULT_SUBADMIN_PERMISSIONS: PermissionKey[] = [
   PERMISSIONS.WELCOME_EDIT,
 ];
 
-// Powerful, platform-affecting permissions (super admin grants with care).
+// Powerful permissions: only super-admins may grant these to others.
 export const PLATFORM_PERMISSIONS: PermissionKey[] = [
   PERMISSIONS.BOTS_CREATE,
   PERMISSIONS.BOTS_DELETE,
+  PERMISSIONS.BOT_TOKEN,
   PERMISSIONS.ADMINS_MANAGE,
   PERMISSIONS.SETTINGS_MANAGE,
+  PERMISSIONS.LISTENER_ACCOUNT,
+  PERMISSIONS.LISTENER_PUSH,
 ];
 
 export const ALL_PERMISSIONS: PermissionKey[] = Object.values(PERMISSIONS);
